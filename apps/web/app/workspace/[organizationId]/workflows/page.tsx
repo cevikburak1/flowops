@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Shell } from "../../../../components/shell";
+import { Pagination } from "../../../../components/pagination";
 import { canManageOrganization } from "../../../../lib/organization";
-import { getApi, getLocale, messages, type Profile, type Workspace } from "../../../../lib/server";
+import { getApi, getLocale, type Profile, type Workspace } from "../../../../lib/server";
 import { workflowStatus, workflowStatuses, workflowText, type WorkflowList } from "../../../../lib/workflows";
 
 export default async function Workflows({ params, searchParams }: {
@@ -23,7 +24,6 @@ export default async function Workflows({ params, searchParams }: {
     getApi<Workspace>(`${api}/workspace`),
   ]);
   const t = workflowText[locale];
-  const common = messages[locale];
   return <Shell profile={profile} organization={organization} locale={locale} active="workflows">
     <header className="page-header"><h1>{t.title}</h1>
       {canManage && <Link className="button primary" href={`${base}/workflows/new`}>{t.create}</Link>}
@@ -55,9 +55,6 @@ export default async function Workflows({ params, searchParams }: {
         </li>)}
       </ul> : <p className="empty-state mt-4">{q || status ? t.noMatches : t.noWorkflows}</p>}
     </section>
-    <div className="pager">
-      {data.page > 1 && <Link className="button secondary" href={`?${queryFor(data.page - 1)}`}>{common.previous}</Link>}
-      {data.hasMore && <Link className="button secondary" href={`?${queryFor(data.page + 1)}`}>{common.next}</Link>}
-    </div>
+    <Pagination page={data.page} more={data.hasMore} href={next => `?${queryFor(next)}`} locale={locale} label={t.title} />
   </Shell>;
 }

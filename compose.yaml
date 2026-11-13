@@ -110,6 +110,8 @@ services:
       AWS_ACCESS_KEY_ID: flowops-dev
       AWS_SECRET_ACCESS_KEY: ${OBJECT_STORAGE_SECRET:-}
       S3_BUCKET: flowops-dev
+    ports:
+      - "127.0.0.1:58333:8333"
     volumes:
       - object-data:/data
     restart: unless-stopped

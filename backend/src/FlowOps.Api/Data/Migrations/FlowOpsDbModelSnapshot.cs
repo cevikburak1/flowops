@@ -156,6 +156,15 @@ namespace FlowOps.Api.Data.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<int>("EmailAttempts")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("EmailCode")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("EmailNextAttemptAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTimeOffset>("ExpiresAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -174,6 +183,9 @@ namespace FlowOps.Api.Data.Migrations
                         .HasColumnType("text");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("EmailNextAttemptAt")
+                        .HasFilter("\"EmailCode\" IS NOT NULL");
 
                     b.HasIndex("TokenHash")
                         .IsUnique();
@@ -305,6 +317,9 @@ namespace FlowOps.Api.Data.Migrations
                         .HasColumnType("text")
                         .HasDefaultValue("starter");
 
+                    b.Property<string>("ProcessPermissions")
+                        .HasColumnType("text");
+
                     b.Property<string>("Slug")
                         .IsRequired()
                         .HasColumnType("text");
@@ -375,6 +390,143 @@ namespace FlowOps.Api.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("OrganizationGroups", "flowops");
+                });
+
+            modelBuilder.Entity("FlowOps.Api.ProcessAttachment", b =>
+                {
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("RunId")
+                        .HasColumnType("uuid");
+
+                    b.Property<byte[]>("Content")
+                        .HasColumnType("bytea");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("ObjectKey")
+                        .HasColumnType("text");
+
+                    b.HasKey("OrganizationId", "RunId");
+
+                    b.ToTable("ProcessAttachments", "flowops");
+                });
+
+            modelBuilder.Entity("FlowOps.Api.ProcessDefinition", b =>
+                {
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Draft")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("ElsaDefinitionId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Published")
+                        .HasColumnType("text");
+
+                    b.Property<int>("Revision")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer");
+
+                    b.HasKey("OrganizationId", "Id");
+
+                    b.ToTable("Processes", "flowops");
+                });
+
+            modelBuilder.Entity("FlowOps.Api.ProcessRun", b =>
+                {
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Answers")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ElsaDefinitionId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Fingerprint")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("NextAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("ProcessId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Subject")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer");
+
+                    b.HasKey("OrganizationId", "Id");
+
+                    b.HasIndex("NextAt")
+                        .HasFilter("\"Status\" = 'running'");
+
+                    b.HasIndex("OrganizationId", "ProcessId", "CreatedAt");
+
+                    b.ToTable("ProcessRuns", "flowops");
+                });
+
+            modelBuilder.Entity("FlowOps.Api.ProcessTask", b =>
+                {
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("RunId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("StepId")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("AssignedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Assignee")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("OrganizationId", "RunId", "StepId");
+
+                    b.HasIndex("OrganizationId", "Assignee", "CompletedAt");
+
+                    b.ToTable("ProcessTasks", "flowops");
                 });
 
             modelBuilder.Entity("FlowOps.Api.Purchase", b =>
@@ -642,6 +794,42 @@ namespace FlowOps.Api.Data.Migrations
                     b.HasOne("FlowOps.Api.Organization", null)
                         .WithMany()
                         .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("FlowOps.Api.ProcessAttachment", b =>
+                {
+                    b.HasOne("FlowOps.Api.ProcessRun", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "RunId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("FlowOps.Api.ProcessDefinition", b =>
+                {
+                    b.HasOne("FlowOps.Api.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("FlowOps.Api.ProcessRun", b =>
+                {
+                    b.HasOne("FlowOps.Api.ProcessDefinition", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "ProcessId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("FlowOps.Api.ProcessTask", b =>
+                {
+                    b.HasOne("FlowOps.Api.ProcessRun", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "RunId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

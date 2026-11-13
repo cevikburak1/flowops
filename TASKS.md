@@ -13,27 +13,38 @@
 - [x] Build the Linux API and web container images locally and confirm that both declare non-root users.
 - [x] Add member listing, email-bound invitations and revocation, role and manager assignment, and configurable finance routing. Verify a new organization can complete a purchase using its own invited manager.
 - [x] Run five Playwright acceptance tests against the migrated database, including invitation identity checks and responsive, light/dark accessibility checks on organization settings.
-- [ ] Add member removal, organization audit browsing, and email delivery for invitations.
-- [ ] Add xUnit and Testcontainers coverage and automate the restart test in CI.
+- [x] Add organization audit browsing with event source filters and pagination, and member removal with routing and assignment safeguards.
+- [x] Deliver invitations through the SMTP queue. Verify in Mailpit that the named recipient receives the same link shown in organization settings.
+- [x] Automate the API restart during a pending finance approval in the CI browser runner and verify it locally with the full Playwright suite.
+- [x] Run xUnit and Testcontainers against disposable PostgreSQL with the real migrations. Verify concurrent tenant workflow limits and persistence of notification outbox rows.
 - [x] Run the initial GitHub Actions workflow on a hosted runner.
 - [ ] Verify production topology, key persistence across deployments, and a database restore on the target environment.
-- [ ] Resolve development-only npm audit findings and verify signed S3 reads and writes with application credentials.
+- [x] Resolve the development-only minimatch advisory and verify zero findings after a clean npm install.
+- [x] Verify signed writes and reads against local SeaweedFS with the development storage credentials. Verify unsigned access is rejected.
 - [x] Phase 5 purchase workflow catalog with tenant-scoped drafts, publication, immutable versions, archiving, and execution history.
 - [x] Verify that a published version executes in Elsa, a stale submission is rejected, and an active purchase completes on its original version after publishing and archiving.
 - [x] Phase 5 catalog search, status filters, duplication, and unpublishing. Verify in Playwright that unpublishing blocks new requests, republishing creates a new version, copies start as independent drafts, and existing executions finish.
 - [x] Phase 6 purchase workflow editor with draggable nodes, connection editing, versioned graph drafts, and publication validation for manager-only and threshold-based finance approval. Verify that a published graph affects Elsa execution and that later graph changes preserve in-flight behavior.
 - [x] Phase 6 purchase graph compilation into persistent Elsa Flowcharts, manager-decision and in-app notification nodes, and execution status on the canvas. Verify compiled approval, rejection, and finance branches.
-- [ ] Extend the builder beyond purchase workflows with parallel, timer, webhook, HTTP, form, and assignment nodes.
+- [x] Add a general process editor, manual and authenticated webhook triggers, parallel branches, durable timers, operator-configured HTTP steps, and execution history.
+- [x] Add a draggable canvas with saved layout and human assignment steps that resume Elsa after the assignee completes the task.
 - [x] Phase 7 personal approval task list with due dates, purchase priority, and pending, overdue, and completed filters. Verify assignee access and the transition from pending to completed in Playwright.
 - [x] Phase 7 team and department creation and editing, lead-based purchase routing, approval reassignment, assignment history, and overdue notifications.
 - [x] Verify the timed escalation path and subsequent approval decision with an overdue fixture.
 - [x] Phase 8 transactional notification outbox, RabbitMQ publisher confirms, optional SMTP and operator webhook, recipient-scoped SignalR updates, and retry counts. Verify local RabbitMQ publication and SMTP delivery to Mailpit.
 - [x] Verify SignalR refreshes the recipient's notifications without a manual page reload.
-- [ ] Verify webhook retries and the n8n receiver end to end.
+- [x] Verify webhook retries against n8n 2.47.7. Confirm the operations report shows the retry, header authentication rejects an unauthenticated request, and the original event succeeds after publication.
 - [x] Phase 9 purchase totals by status, recent audit log, organization usage, operator administration, and plan labels.
 - [x] Verify operator-only plan changes and the corresponding organization audit record locally.
-- [ ] Add billing, entitlement enforcement, and longer audit history.
+- [x] Enforce configurable per-plan workflow limits for creation and duplication. Verify that archiving frees capacity and organizations have separate limits.
+- [ ] Add payment collection, invoices, and subscription lifecycle integration.
 - [x] Phase 10 persistent API key path configuration, trusted proxy support, response headers, deployment and recovery documentation, Release builds, and local Docker image builds.
 - [x] Verify purchase and organization scenarios in five Playwright tests, including lead-based routing, reassignment, and report layouts at 1440, 1024, 768 and 390px with light and dark axe checks.
+- [x] Restore a local FlowOps and Elsa PostgreSQL backup into a separate database and complete an approval that was pending at backup time.
+- [x] Verify production authentication configuration and persisted key reuse locally. Validate the key ring during production API startup.
 - [ ] Complete production performance, recovery, and deployment verification.
-- [ ] Advanced roles, general-purpose forms, and attachments.
+- [x] Add process editor and operator roles, reusable text, number and date form fields, and tenant-authorized file attachments up to 1 MiB.
+- [x] Configure process permissions per role and store attachments larger than 1 MiB in S3-compatible storage. Verify an authorized 10 MiB round trip with SeaweedFS.
+- [x] Redesign the workspace dashboard and navigation. Add 6-, 12-, and 48-month purchase activity and paginate requests, approvals, notifications, tasks, workflow and process catalogs, histories, settings lists, and report audit events.
+- [x] Populate the local demo workspace with 1,126 purchases, 646 process runs, 2,846 notifications, and 11 definitions in each catalog. Historical completions are synthetic archive records. Pending work uses the live Elsa workflow.
+- [x] Verify the populated workspace at 1440, 1024, 768, and 390px in both themes. Check keyboard navigation, chart selection, pagination, Turkish labels, form validation, and axe. Next.js and API builds passed. The existing Playwright suite passed six tests and skipped the optional HTTP target test.

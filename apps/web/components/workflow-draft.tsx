@@ -39,7 +39,12 @@ export function WorkflowDraftForm({ api, href, locale, currency, workflow }: {
       });
       if (response.status === 401) { location.assign(new URL("/auth/login", location.origin)); return; }
       if (!response.ok) {
-        setError(response.status === 409 ? t.changed : response.status === 400
+        if (response.status === 409) {
+          const problem = await response.json().catch(() => ({})) as { code?: string };
+          setError(problem.code === "workflowPlanLimit" ? t.planLimit : t.changed);
+          return;
+        }
+        setError(response.status === 400
           ? action === "publish" ? graphText[locale].invalid : t.invalid : t.failed);
         return;
       }

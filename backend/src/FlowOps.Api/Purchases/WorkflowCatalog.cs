@@ -41,7 +41,7 @@ internal static class WorkflowCatalog
         if (member is null) return Results.NotFound();
         var canManage = CanManage(member);
         var current = Math.Clamp(page ?? 1, 1, 10000);
-        const int size = 20;
+        const int size = 10;
         var search = q?.Trim();
         if (search?.Length > 120 || status is not (null or "" or "draft" or "published" or "unpublished" or "archived"))
             return Results.BadRequest(new { code = "invalidFilter" });
@@ -70,15 +70,16 @@ internal static class WorkflowCatalog
         return Results.Ok(new { Items = items.Take(size), Page = current, HasMore = items.Count > size });
     }
 
-    private static async Task<IResult> DetailsAsync(Guid organizationId, Guid workflowId, int? page, ClaimsPrincipal user, FlowOpsDb db, CancellationToken token)
+    private static async Task<IResult> DetailsAsync(Guid organizationId, Guid workflowId, int? page, int? versionPage, ClaimsPrincipal user, FlowOpsDb db, CancellationToken token)
     {
         if (!CanManage(await MemberAsync(db, organizationId, user, token))) return Results.NotFound();
         var flow = await db.PurchaseWorkflows.AsNoTracking().SingleOrDefaultAsync(x => x.OrganizationId == organizationId && x.Id == workflowId, token);
         if (flow is null) return Results.NotFound();
         var current = Math.Clamp(page ?? 1, 1, 10000);
-        const int size = 20;
+        var currentVersions = Math.Clamp(versionPage ?? page ?? 1, 1, 10000);
+        const int size = 10;
         var versions = await db.PurchaseWorkflowVersions.AsNoTracking().Where(x => x.OrganizationId == organizationId && x.WorkflowId == workflowId)
-            .OrderByDescending(x => x.Number).Skip((current - 1) * size).Take(size + 1)
+            .OrderByDescending(x => x.Number).Skip((currentVersions - 1) * size).Take(size + 1)
             .Select(x => new { x.Number, x.Name, x.FinanceThreshold, x.PublishedAt }).ToListAsync(token);
         var runs = await db.Purchases.AsNoTracking().Where(x => x.OrganizationId == organizationId && x.WorkflowId == workflowId)
             .OrderByDescending(x => x.CreatedAt).ThenBy(x => x.Id).Skip((current - 1) * size).Take(size + 1)
@@ -86,15 +87,19 @@ internal static class WorkflowCatalog
         return Results.Ok(new { flow.Id, flow.Name, flow.FinanceThreshold, flow.Revision, flow.Archived, flow.PublishedVersion, flow.Unpublished,
             Graph = PurchaseGraph.Read(flow.GraphJson),
             HasDraft = flow.PublishedRevision != flow.Revision, Versions = versions.Take(size), Runs = runs.Take(size),
-            Page = current, HasMore = versions.Count > size || runs.Count > size });
+            Page = current, HasMore = versions.Count > size || runs.Count > size,
+            RunsHaveMore = runs.Count > size, VersionPage = currentVersions, VersionsHaveMore = versions.Count > size });
     }
 
-    private static async Task<IResult> CreateAsync(Guid organizationId, WorkflowDraft input, ClaimsPrincipal user, FlowOpsDb db, CancellationToken token)
+    internal static async Task<IResult> CreateAsync(Guid organizationId, WorkflowDraft input, ClaimsPrincipal user, FlowOpsDb db,
+        PlanEntitlements entitlements, CancellationToken token)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(token);
-        if (await OrganizationEndpoints.LockAsync(db, organizationId, token) is null ||
+        if (await OrganizationEndpoints.LockAsync(db, organizationId, token) is not { } organization ||
             !CanManage(await MemberAsync(db, organizationId, user, token))) return Results.NotFound();
         if (!IsValid(input)) return Results.BadRequest(new { code = "invalidDraft" });
+        if (!await entitlements.CanAddWorkflowAsync(db, organization, token))
+            return Results.Conflict(new { code = "workflowPlanLimit" });
         var flow = new PurchaseWorkflowDefinition { OrganizationId = organizationId, Name = input.Name!.Trim(),
             FinanceThreshold = input.FinanceThreshold!.Value, GraphJson = input.Graph?.Serialize() };
         db.PurchaseWorkflows.Add(flow);
@@ -149,10 +154,11 @@ internal static class WorkflowCatalog
             return null;
         });
 
-    private static async Task<IResult> DuplicateAsync(Guid organizationId, Guid workflowId, WorkflowCopy input, ClaimsPrincipal user, FlowOpsDb db, CancellationToken token)
+    internal static async Task<IResult> DuplicateAsync(Guid organizationId, Guid workflowId, WorkflowCopy input, ClaimsPrincipal user,
+        FlowOpsDb db, PlanEntitlements entitlements, CancellationToken token)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(token);
-        if (await OrganizationEndpoints.LockAsync(db, organizationId, token) is null ||
+        if (await OrganizationEndpoints.LockAsync(db, organizationId, token) is not { } organization ||
             !CanManage(await MemberAsync(db, organizationId, user, token))) return Results.NotFound();
         var source = await db.PurchaseWorkflows.AsNoTracking()
             .SingleOrDefaultAsync(x => x.OrganizationId == organizationId && x.Id == workflowId, token);
@@ -160,6 +166,8 @@ internal static class WorkflowCatalog
         if (source.Revision != input.Revision) return Results.Conflict(new { code = "workflowChanged" });
         var name = input.Name?.Trim();
         if (name is not { Length: >= 3 and <= 120 }) return Results.BadRequest(new { code = "invalidDraft" });
+        if (!await entitlements.CanAddWorkflowAsync(db, organization, token))
+            return Results.Conflict(new { code = "workflowPlanLimit" });
         var copy = new PurchaseWorkflowDefinition { OrganizationId = organizationId, Name = name, FinanceThreshold = source.FinanceThreshold,
             GraphJson = source.GraphJson };
         db.PurchaseWorkflows.Add(copy);

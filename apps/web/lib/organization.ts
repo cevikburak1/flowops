@@ -12,7 +12,10 @@ const en = {
   signIn: "Sign in to accept", joinMissing: "Open the invitation link you received to join this organization.",
   error: "The change could not be saved. Try again.", invalidInvitation: "This invitation is invalid for your account or has expired.",
   verifiedEmailRequired: "Verify your email in Keycloak before accepting the invitation.",
-  memberHasAssignments: "Reassign the member’s active approvals and routing before changing their role.",
+  memberHasAssignments: "Reassign this member’s active approvals and routing first.",
+  remove: "Remove member", confirmRemove: "Confirm removal",
+  removeHint: "This member will lose access to this organization.",
+  memberProtected: "This membership cannot be removed with your account.",
   invalidManager: "Choose an eligible manager from this organization.",
   invalidFinance: "Choose a member with the Approver role.", invalidThreshold: "Enter a valid threshold.",
   invalidRole: "Choose a permitted role.", invalidEmail: "Enter a valid email address.", alreadyMember: "This email is already a member.",
@@ -28,6 +31,8 @@ const en = {
   webhookUnavailable: "The operator has yet to configure a webhook.",
   OrganizationOwner: "Owner", OrganizationAdmin: "Administrator", Manager: "Manager",
   Approver: "Approver", Employee: "Employee", Viewer: "Viewer",
+  ProcessEditor: "Process editor", ProcessOperator: "Process operator",
+  processPermissions: "Process permissions", editProcess: "Edit and publish", runProcess: "Start runs", inspectProcess: "View all runs",
 };
 
 const tr: typeof en = {
@@ -42,7 +47,10 @@ const tr: typeof en = {
   signIn: "Kabul etmek için giriş yap", joinMissing: "Kuruluşa katılmak için size gönderilen davet bağlantısını açın.",
   error: "Değişiklik kaydedilemedi. Tekrar deneyin.", invalidInvitation: "Bu davet hesabınız için geçersiz veya süresi dolmuş.",
   verifiedEmailRequired: "Daveti kabul etmeden önce Keycloak'ta e-posta adresinizi doğrulayın.",
-  memberHasAssignments: "Rolü değiştirmeden önce üyenin aktif onaylarını ve yönlendirmelerini yeniden atayın.",
+  memberHasAssignments: "Önce bu üyenin aktif onaylarını ve yönlendirmelerini yeniden atayın.",
+  remove: "Üyeyi çıkar", confirmRemove: "Çıkarmayı onayla",
+  removeHint: "Bu üyenin kuruluşa erişimi kaldırılacak.",
+  memberProtected: "Hesabınız bu üyeliği kaldıramaz.",
   invalidManager: "Bu kuruluştan uygun bir yönetici seçin.",
   invalidFinance: "Onaylayıcı rolüne sahip bir üye seçin.", invalidThreshold: "Geçerli bir eşik girin.",
   invalidRole: "İzin verilen bir rol seçin.", invalidEmail: "Geçerli bir e-posta adresi girin.", alreadyMember: "Bu e-posta zaten bir üyeye ait.",
@@ -58,10 +66,12 @@ const tr: typeof en = {
   webhookUnavailable: "Operatör henüz bir webhook yapılandırmadı.",
   OrganizationOwner: "Kuruluş sahibi", OrganizationAdmin: "Kuruluş yöneticisi", Manager: "Yönetici",
   Approver: "Onaylayıcı", Employee: "Çalışan", Viewer: "İzleyici",
+  ProcessEditor: "Süreç editörü", ProcessOperator: "Süreç operatörü",
+  processPermissions: "Süreç yetkileri", editProcess: "Düzenle ve yayınla", runProcess: "Çalıştır", inspectProcess: "Tüm çalıştırmaları gör",
 };
 
 export const organizationText = { en, tr };
-export const roles = ["OrganizationAdmin", "Manager", "Approver", "Employee", "Viewer"] as const;
+export const roles = ["OrganizationAdmin", "Manager", "Approver", "Employee", "Viewer", "ProcessEditor", "ProcessOperator"] as const;
 export type Role = typeof roles[number] | "OrganizationOwner";
 export function organizationError(locale: Locale, code: string) {
   const t = organizationText[locale];
@@ -78,6 +88,8 @@ export interface OrganizationSettings {
   financeThreshold: number;
   financeApprover: string | null;
   canAssignAdmin: boolean;
+  actorSubject: string;
   webhookAvailable: boolean;
   webhookEnabled: boolean;
+  processPermissions: Record<string, { edit: boolean; run: boolean; inspect: boolean }>;
 }

@@ -15,8 +15,6 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24.17.0
-          cache: npm
-          cache-dependency-path: apps/web/package-lock.json
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: backend/global.json
@@ -33,11 +31,22 @@ jobs:
         run: |
           dotnet restore src/FlowOps.Api
           dotnet build src/FlowOps.Api --no-restore -c Release
+          dotnet run --project tests/FlowOps.Api.Tests -c Release
       - name: Browser acceptance tests
         shell: pwsh
+        env:
+          Integrations__Smtp__Host: localhost
+          Integrations__Smtp__Port: '51025'
+          Integrations__Smtp__From: flowops@example.test
+          Integrations__Smtp__Tls: 'false'
+          FLOWOPS_TEST_MAILPIT_ORIGIN: http://127.0.0.1:58025
+          Processes__Targets__receipt: http://127.0.0.1:5084/receipt
+          FLOWOPS_TEST_PROCESS_HTTP: '1'
+          FLOWOPS_TEST_PROCESS_STORAGE: '1'
         run: |
           ./infrastructure/dev.ps1 init
-          docker compose up -d --wait
+          docker compose up -d --wait postgres keycloak redis rabbitmq mailpit object-storage
+          ./infrastructure/verify-s3.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Push-Location apps/web
           npx --no-install playwright install --with-deps chromium
@@ -50,4 +59,4 @@ jobs:
           docker build -t flowops-web:ci apps/web
       - name: Stop test dependencies
         if: always() && hashFiles('.env') != ''
-        run: docker compose down
+        run: docker compose --profile integrations down

@@ -1,16 +1,15 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChangePlan } from "../../../components/organization-settings";
+import { Pagination } from "../../../components/pagination";
 import { Shell } from "../../../components/shell";
 import { reportText, type PlatformOrganizations } from "../../../lib/reports";
-import { getApi, getLocale, messages, type Profile } from "../../../lib/server";
+import { getApi, getLocale, type Profile } from "../../../lib/server";
 
 export default async function PlatformPage({ searchParams }: { searchParams: Promise<{ page?: string }> }) {
   const [{ page }, profile, locale] = await Promise.all([searchParams, getApi<Profile>("/api/me"), getLocale()]);
   if (!profile.isOperator) notFound();
   const data = await getApi<PlatformOrganizations>(`/api/platform/organizations?page=${/^\d{1,5}$/.test(page ?? "") ? page : "1"}`);
   const t = reportText[locale];
-  const labels = messages[locale];
   const number = new Intl.NumberFormat(locale);
   return <Shell profile={profile} locale={locale} active="platform">
     <header className="page-header"><h1>{t.platform}</h1></header>
@@ -26,9 +25,6 @@ export default async function PlatformPage({ searchParams }: { searchParams: Pro
         </tr>)}</tbody>
       </table></div> : <p className="empty-state muted">{t.noOrganizations}</p>}
     </section>
-    <div className="flex gap-2 pager">
-      {data.page > 1 && <Link className="button" href={`?page=${data.page - 1}`}>{labels.previous}</Link>}
-      {data.hasMore && <Link className="button" href={`?page=${data.page + 1}`}>{labels.next}</Link>}
-    </div>
+    <Pagination page={data.page} more={data.hasMore} href={next => `?page=${next}`} locale={locale} label={t.organizations} />
   </Shell>;
 }

@@ -5,6 +5,7 @@ const apiOrigin = process.env.FLOWOPS_API_ORIGIN ?? "http://127.0.0.1:5080";
 const config: NextConfig = {
   output: "standalone",
   poweredByHeader: false,
+  experimental: { proxyClientMaxBodySize: 15_000_000 },
   async headers() {
     return [{
       source: "/:path*",

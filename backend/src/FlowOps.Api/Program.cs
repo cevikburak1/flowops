@@ -16,6 +16,9 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
+var entitlements = new PlanEntitlements(builder.Configuration);
+entitlements.Validate();
+builder.Services.AddSingleton(entitlements);
 var development = builder.Environment.IsDevelopment();
 builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", LogLevel.Warning);
 var connection = builder.Configuration.GetConnectionString("FlowOps")
@@ -26,13 +29,10 @@ var authority = builder.Configuration["Auth:Authority"] ?? (development
 var webOrigin = new Uri(builder.Configuration["Auth:WebOrigin"] ?? (development
     ? "http://localhost:3000"
     : throw new InvalidOperationException("Auth:WebOrigin is required.")));
-if (!development && (webOrigin.Scheme != "https" || new Uri(authority).Scheme != "https"))
-    throw new InvalidOperationException("Production authentication requires HTTPS.");
 var secret = builder.Configuration["Auth:ClientSecret"]
     ?? throw new InvalidOperationException("Auth:ClientSecret is required.");
 var keys = builder.Configuration["Auth:DataProtectionKeyPath"];
-if (!development && (string.IsNullOrWhiteSpace(keys) || !Path.IsPathFullyQualified(keys) || !Directory.Exists(keys)))
-    throw new InvalidOperationException("Mount an existing absolute Auth:DataProtectionKeyPath in production.");
+if (!development) AuthDeployment.Validate(webOrigin, authority, keys);
 if (!string.IsNullOrWhiteSpace(keys))
     builder.Services.AddDataProtection().SetApplicationName("FlowOps").PersistKeysToFileSystem(new DirectoryInfo(keys));
 
@@ -117,6 +117,10 @@ builder.Services.AddAuthentication(options =>
 });
 builder.Services.AddAuthorization();
 builder.Services.AddSignalR();
+builder.Services.AddSingleton<ProcessTargets>();
+builder.Services.AddSingleton<ProcessObjectStore>();
+builder.Services.AddHttpClient("flowops-process", client => client.Timeout = TimeSpan.FromSeconds(10))
+    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
 builder.Services.AddSingleton<IUserIdProvider, KeycloakUserIdProvider>();
 builder.Services.AddHttpClient("flowops-webhook").ConfigurePrimaryHttpMessageHandler(() =>
     new SocketsHttpHandler { AllowAutoRedirect = false });
@@ -134,13 +138,26 @@ builder.Services.AddElsa(elsa =>
     elsa.AddActivity<WaitForPurchaseApproval>();
     elsa.AddActivity<EvaluatePurchaseBranch>();
     elsa.AddActivity<NotifyPurchaseRequester>();
+    elsa.AddActivity<ProcessTimer>();
+    elsa.AddActivity<ProcessHttp>();
+    elsa.AddActivity<ProcessAssignment>();
     elsa.AddWorkflow<PurchaseApprovalWorkflow>();
 });
 builder.Services.AddHostedService<PurchaseWorkflowWorker>();
+builder.Services.AddHostedService<ProcessWorker>();
 builder.Services.AddHostedService<ApprovalAssignments>();
 builder.Services.AddHostedService<NotificationDispatcher>();
+builder.Services.AddSingleton<InvitationEmailDelivery>();
+builder.Services.AddHostedService(services => services.GetRequiredService<InvitationEmailDelivery>());
 
 var app = builder.Build();
+if (!development)
+{
+    var protector = app.Services.GetRequiredService<IDataProtectionProvider>().CreateProtector("FlowOps.StartupCheck.v1");
+    var marker = Guid.NewGuid().ToString();
+    if (protector.Unprotect(protector.Protect(marker)) != marker)
+        throw new InvalidOperationException("The API key ring failed its startup verification.");
+}
 app.UseExceptionHandler();
 app.UseForwardedHeaders();
 app.Use(async (context, next) =>

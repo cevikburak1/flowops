@@ -1,23 +1,24 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Shell } from "../../../../../components/shell";
+import { Pagination } from "../../../../../components/pagination";
 import { WorkflowDraftForm } from "../../../../../components/workflow-draft";
 import { canManageOrganization } from "../../../../../lib/organization";
 import { label } from "../../../../../lib/messages";
-import { getApi, getLocale, messages, type Profile } from "../../../../../lib/server";
+import { getApi, getLocale, type Profile } from "../../../../../lib/server";
 import { workflowStatus, workflowText, type WorkflowDetail } from "../../../../../lib/workflows";
 
 export default async function Workflow({ params, searchParams }: {
-  params: Promise<{ organizationId: string; workflowId: string }>; searchParams: Promise<{ page?: string }>;
+  params: Promise<{ organizationId: string; workflowId: string }>; searchParams: Promise<{ page?: string; versionPage?: string }>;
 }) {
-  const [{ organizationId, workflowId }, { page }, profile, locale] = await Promise.all([params, searchParams, getApi<Profile>("/api/me"), getLocale()]);
+  const [{ organizationId, workflowId }, { page, versionPage }, profile, locale] = await Promise.all([params, searchParams, getApi<Profile>("/api/me"), getLocale()]);
   const organization = profile.organizations.find(item => item.id === organizationId);
   if (!organization || !canManageOrganization(organization.role) || !/^[0-9a-f-]{36}$/i.test(workflowId)) notFound();
   const base = `/workspace/${organizationId}`;
   const api = `/api/organizations/${organizationId}/workflows/${workflowId}`;
-  const workflow = await getApi<WorkflowDetail>(`${api}?page=${encodeURIComponent(page ?? "1")}`);
+  const validPage = (value: string | undefined) => typeof value === "string" && /^\d{1,5}$/.test(value) ? value : "1";
+  const workflow = await getApi<WorkflowDetail>(`${api}?page=${validPage(page)}&versionPage=${validPage(versionPage)}`);
   const t = workflowText[locale];
-  const common = messages[locale];
   const date = new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeZone: "UTC" });
   const money = new Intl.NumberFormat(locale, { style: "currency", currency: organization.currency });
   const status = workflowStatus(workflow);
@@ -33,7 +34,7 @@ export default async function Workflow({ params, searchParams }: {
       </section>
       <div className="detail-grid">
         <section className="panel detail-panel">
-          <h2>{t.runs}</h2>
+          <h2 id="workflow-runs">{t.runs}</h2>
           {workflow.runs.length ? <ul className="decisions">{workflow.runs.map(run =>
             <li key={run.id}>
               <Link className="underline break-all" href={`${base}/purchases/${run.id}`}>{run.title}</Link>
@@ -41,9 +42,11 @@ export default async function Workflow({ params, searchParams }: {
               <time dateTime={run.createdAt}>{date.format(new Date(run.createdAt))}</time>
             </li>
           )}</ul> : <p className="muted mt-3">{t.noRuns}</p>}
+          <Pagination page={workflow.page} more={workflow.runsHaveMore}
+            href={next => `?page=${next}&versionPage=${workflow.versionPage}#workflow-runs`} locale={locale} label={t.runs} />
         </section>
       <section className="panel detail-panel">
-        <h2>{t.versions}</h2>
+        <h2 id="workflow-versions">{t.versions}</h2>
         {workflow.versions.length ? <ol className="decisions">{workflow.versions.map(version =>
           <li key={version.number}>
             <h3>{t.version} {version.number} / {version.name}</h3>
@@ -51,12 +54,10 @@ export default async function Workflow({ params, searchParams }: {
             <time dateTime={version.publishedAt}>{date.format(new Date(version.publishedAt))}</time>
           </li>
         )}</ol> : <p className="muted mt-3">{t.noVersions}</p>}
+        <Pagination page={workflow.versionPage} more={workflow.versionsHaveMore}
+          href={next => `?page=${workflow.page}&versionPage=${next}#workflow-versions`} locale={locale} label={t.versions} />
       </section>
       </div>
-    </div>
-    <div className="pager">
-      {workflow.page > 1 && <Link className="button secondary" href={`?page=${workflow.page - 1}`}>{common.previous}</Link>}
-      {workflow.hasMore && <Link className="button secondary" href={`?page=${workflow.page + 1}`}>{common.next}</Link>}
     </div>
   </Shell>;
 }

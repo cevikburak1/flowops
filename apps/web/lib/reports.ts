@@ -6,6 +6,8 @@ const en = {
   amount: "Total amount", noPurchases: "No purchases were submitted in this period.",
   overdue: "Overdue approvals", members: "Members", workflows: "Workflows", plan: "Plan",
   activity: "Audit log", time: "Time", actor: "Actor", action: "Action", target: "Target",
+  auditSource: "Event source", auditAll: "All events", auditOrganization: "Organization", auditPurchase: "Purchases",
+  auditPagination: "Audit log pagination",
   noActivity: "No audit events in this period.", deliveries: "Delivery retries", channel: "Channel",
   queued: "Waiting", nextAttempt: "Next attempt", noRetries: "No deliveries are waiting to retry.",
   organizations: "Organizations", starter: "Starter", business: "Business", enterprise: "Enterprise",
@@ -15,6 +17,8 @@ const en = {
   memberUpdated: "Member updated", routingUpdated: "Routing updated", groupCreated: "Group created",
   groupUpdated: "Group updated", webhookEnabled: "Webhook enabled", webhookDisabled: "Webhook disabled",
   planChanged: "Plan changed", noOrganizations: "No organizations on this page.",
+  memberRemoved: "Member removed",
+  processPermissionsUpdated: "Process permissions updated",
 };
 
 const tr: typeof en = {
@@ -23,6 +27,8 @@ const tr: typeof en = {
   amount: "Toplam tutar", noPurchases: "Bu dönemde satın alma talebi gönderilmedi.",
   overdue: "Geciken onaylar", members: "Üyeler", workflows: "İş akışları", plan: "Plan",
   activity: "Denetim kaydı", time: "Zaman", actor: "İşlemi yapan", action: "İşlem", target: "Hedef",
+  auditSource: "Olay kaynağı", auditAll: "Tüm olaylar", auditOrganization: "Kuruluş", auditPurchase: "Satın almalar",
+  auditPagination: "Denetim kaydı sayfaları",
   noActivity: "Bu dönemde denetim kaydı yok.", deliveries: "Teslimat denemeleri", channel: "Kanal",
   queued: "Bekleyen", nextAttempt: "Sonraki deneme", noRetries: "Yeniden denenmeyi bekleyen teslimat yok.",
   organizations: "Kuruluşlar", starter: "Başlangıç", business: "İşletme", enterprise: "Kurumsal",
@@ -32,6 +38,8 @@ const tr: typeof en = {
   memberUpdated: "Üye güncellendi", routingUpdated: "Yönlendirme güncellendi", groupCreated: "Grup oluşturuldu",
   groupUpdated: "Grup güncellendi", webhookEnabled: "Webhook açıldı", webhookDisabled: "Webhook kapatıldı",
   planChanged: "Plan değiştirildi", noOrganizations: "Bu sayfada kuruluş yok.",
+  memberRemoved: "Üye çıkarıldı",
+  processPermissionsUpdated: "Süreç yetkileri güncellendi",
 };
 
 export const reportText = { en, tr };
@@ -51,6 +59,8 @@ export interface Report {
   workflows: number;
   plan: Plan;
   audit: { id: string; actor: string; action: string; target: string | null; at: string }[];
+  auditPage: number;
+  auditHasMore: boolean;
   deliveries: { channel: DeliveryChannel; count: number; nextAttemptAt: string }[];
 }
 

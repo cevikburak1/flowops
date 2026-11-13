@@ -1,97 +1,105 @@
 # FlowOps
 
-**A purchase approval workspace for organizations that need to see who owns the next step, which rules ran, and how a decision was made.**
+**Run purchase approvals and internal processes in one workspace.**
+
+FlowOps gives requesters a place to submit and track work, reviewers a queue of assigned decisions, and administrators a record of the rules and actions behind each outcome. The workspace is available in English and Turkish, with light and dark themes.
+
+[Quick start](#quick-start) · [Try the demo](#try-the-demo) · [Architecture](#architecture) · [Costs and licensing](#costs-and-licensing) · [Documentation](#documentation)
 
 [![Verify](https://github.com/cevikburak1/flowops/actions/workflows/verify.yml/badge.svg?branch=main)](https://github.com/cevikburak1/flowops/actions/workflows/verify.yml)
 
-[Run locally](#run-locally) · [Try the demo](#try-the-demo) · [How it works](#how-it-works) · [Documentation](#documentation)
+![FlowOps overview showing purchase history, request statuses, pending approvals, and recent notifications](docs/images/workspace-overview.png)
 
-## From request to decision
+*The dashboard shown above uses synthetic purchase history.*
 
-1. **Submit.** An employee enters an amount, category, description, and priority.
-2. **Route.** FlowOps selects the employee’s manager, team lead, or department lead. The published workflow can send higher-value requests to finance.
-3. **Decide.** Reviewers work from **My tasks**, with a due date and a record of each decision. Administrators can reassign an open task.
-4. **Trace.** The request retains its published workflow version. The execution canvas shows the steps Elsa ran, and the operations report summarizes purchases, overdue work, and recent audit activity.
+## What you can do
 
-| Workspace | What you can do |
+| Area | Capabilities |
 | --- | --- |
-| **Workflows** | Edit purchase graphs, publish immutable versions, and inspect active or completed executions |
-| **My tasks** | Filter open, overdue, and completed approvals by priority |
-| **Organization settings** | Invite members, configure roles and routing, and maintain teams and departments |
-| **Operations report** | Review purchase counts and totals by status, audit events, and notification delivery retries |
-| **Platform administration** | Browse organization usage and change plan labels from an operator account |
+| **Purchase approvals** | Submit requests with amounts and priorities, route to a manager or team lead, and send qualifying purchases to finance. Reviewers get due dates and a decision history. |
+| **Workflow catalog** | Edit graphs on a drag-and-drop canvas, publish immutable versions, and inspect the execution attached to a purchase. |
+| **General processes** | Start runs from a form or authenticated webhook. Combine assignments, parallel branches, durable timers, and HTTP steps with named destinations. Collect text, numbers, dates, and file attachments. |
+| **Operations dashboard** | Explore 6-, 12-, or 48-month purchase history, open assigned approvals, and follow notifications. Growing lists use pagination. |
+| **Organization administration** | Invite members, organize teams and departments, configure routing and process permissions, and review audit events and delivery retries. |
 
-The workspace is available in English and Turkish, with light and dark themes.
+## Quick start
 
-## Run locally
-
-Install Docker with Compose, PowerShell 7, Node.js 24, and .NET SDK 11.0.100 or a newer patch in that feature band. Run these commands from the repository root.
+Install PowerShell 7, Docker with Compose, Node.js 24, and the .NET SDK listed in [backend/global.json](backend/global.json). Then run the following from the repository root.
 
 ```powershell
+git clone https://github.com/cevikburak1/flowops.git
+cd flowops
 ./infrastructure/dev.ps1 init
 docker compose up -d --wait
 npm --prefix apps/web ci --ignore-scripts
 ```
 
-Start the API and the web app in separate terminals.
+Start each command in its own terminal.
 
 ```powershell
 ./infrastructure/dev.ps1 api
 ./infrastructure/dev.ps1 web
 ```
 
-Open [FlowOps on localhost:3000](http://localhost:3000). The setup script generates credentials in `.env`. The API applies migrations and seeds two demo organizations.
+Open [FlowOps](http://localhost:3000). The API applies database migrations and adds two development organizations. The setup script generates a local `.env` with credentials for PostgreSQL, Keycloak, and the demo accounts. Keep this file local.
 
 ### Try the demo
 
+Use `FLOWOPS_DEV_PASSWORD` from your local `.env` for the three development accounts. Use separate browser profiles to try multiple roles at once.
+
 | Sign in as | Try this |
 | --- | --- |
-| `employee` | Open **Northstar Operations** and submit a purchase for USD 6,000 |
-| `manager` | Use **My tasks** to approve the request |
-| `finance` | Complete the finance approval. Switch to **Juniper Labs** to publish a graph or open the operations report |
+| `employee` | In **Northstar Operations**, submit a purchase for USD 6,000. |
+| `manager` | Open **My tasks** and approve the purchase. |
+| `finance` | Complete the finance approval. Switch to **Juniper Labs** to manage workflows and processes or view reports. |
 
-Use `FLOWOPS_DEV_PASSWORD` from your local `.env` for all three accounts. Separate browser profiles let you keep each role open. In Juniper Labs, invite a member and assign a manager or group lead before submitting from a published workflow.
+To submit requests in a new organization, assign the requester a manager or a team or department lead. For optional local Mailpit, SeaweedFS, and n8n services, run `./infrastructure/dev.ps1 integrations`. Stop the app terminals with Ctrl+C and the containers with `docker compose --profile integrations stop`.
 
-Run `./infrastructure/dev.ps1 integrations` to start Mailpit, n8n, and S3-compatible storage. See the [deployment guide](docs/DEPLOYMENT.md) for SMTP, webhook, and operator configuration. Stop the app terminals with Ctrl+C and the containers with `docker compose --profile integrations stop`.
-
-## How it works
+## Architecture
 
 ```mermaid
 flowchart LR
     Browser --> Web["Next.js workspace"]
-    Browser --> Keycloak["Keycloak sign-in"]
+    Browser --> Keycloak["Keycloak / OIDC"]
     Web --> API["ASP.NET Core API"]
     API --> Postgres[("PostgreSQL")]
     API --> Elsa["Elsa workflow runtime"]
     Elsa --> Postgres
-    Postgres --> Delivery["Notification outbox"]
-    Delivery --> SignalR
-    Delivery --> RabbitMQ
-    Delivery --> SMTP
-    Delivery --> Webhook["Operator webhook / n8n"]
+    Postgres --> Outbox["Notification outbox"]
+    Outbox --> SignalR
+    Outbox --> RabbitMQ
+    Outbox -. Optional .-> SMTP
+    Outbox -. Optional .-> Webhook
+    API -. Optional .-> Storage["S3-compatible storage"]
 ```
 
-The API checks membership and scopes queries to the active organization. Elsa persists an approval bookmark while a reviewer decides. The decision and command to resume Elsa are written together. The notification worker retries channel deliveries independently, and consumers can deduplicate using the event ID.
+Next.js uses server-side OIDC sessions. The API resolves organization membership and scopes data access by tenant. Elsa persists execution across human decisions and timers. FlowOps stores a purchase decision together with the command that resumes execution. A transactional outbox tracks notification delivery and retries.
+
+## Costs and licensing
+
+- **Local use** requires no OpenAI API key, paid API subscription, cloud account, or payment setup. Plan labels and limits are application settings. Payment collection and invoicing are outside the current implementation.
+- **GitHub** offers free standard Actions runners for public repositories. This repository uses a standard Ubuntu runner for verification. [GitHub Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions)
+- **Docker** can run the stack locally. Docker Desktop is free for personal use and other qualifying users under its terms. [Docker Desktop licensing](https://docs.docker.com/subscription-billing/desktop-license/)
+- **Optional services** can run locally with Mailpit and SeaweedFS. Managed hosting, SMTP, or object storage may incur provider charges if configured. n8n is optional and has its own terms for internal, personal, or non-commercial use. [n8n license](https://github.com/n8n-io/n8n/blob/master/LICENSE.md)
+- **Source availability.** FlowOps currently has no project-wide software license. Third-party development tools retain their own terms. [Third-party notices](docs/THIRD_PARTY.md)
 
 ## Verify
 
-With the local stack running, install Chromium and run the browser suite.
+With the local stack running, install the test browser and run the acceptance suite.
 
 ```powershell
 npm --prefix apps/web exec -- playwright install chromium
 ./infrastructure/dev.ps1 test
 ```
 
-GitHub Actions runs lint, type checks, builds, browser acceptance tests, and container image builds. The [testing guide](docs/TESTING.md) covers the demo scenarios.
+The GitHub workflow checks lint, types, builds, browser acceptance, backend tests, and container builds. See the [testing guide](docs/TESTING.md) for setup and additional scenarios.
 
 ## Documentation
 
 | Guide | Contents |
 | --- | --- |
 | [Architecture](ARCHITECTURE.md) | Service and tenant boundaries |
-| [Workflows](docs/WORKFLOWS.md) | Graph rules, publication, and execution |
-| [API](docs/API.md) | Requests, tasks, reporting, and administration |
-| [Deployment](docs/DEPLOYMENT.md) | Runtime configuration, integration settings, and recovery |
-| [Implementation checkpoints](TASKS.md) | Verified milestones and remaining work |
-
-FlowOps currently ships a purchase workflow editor and a plan catalog foundation. The checkpoints track general-purpose graph nodes, billing, and deployment verification.
+| [Workflows](docs/WORKFLOWS.md) | Purchase graphs, process definitions, and execution |
+| [API](docs/API.md) | Routes, permissions, and pagination |
+| [Deployment](docs/DEPLOYMENT.md) | Runtime settings, integrations, and recovery |
+| [Project status](TASKS.md) | Implemented features, verification, and remaining work |

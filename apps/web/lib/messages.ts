@@ -28,6 +28,15 @@ const en = {
   processing: "Updating workflow status", decisionSaved: "Decision recorded", noManager: "Purchase submission requires an assigned manager.",
   titleInvalid: "Enter 3 to 120 characters.", descriptionInvalid: "Enter 5 to 2,000 characters.",
   amountInvalid: "Enter a positive amount with up to two decimal places.", categoryInvalid: "Select a category.",
+  operations: "Operations", configuration: "Configuration", recentRequests: "Recent requests",
+  requestBreakdown: "Request status", viewRequests: "All requests", viewApprovals: "Approval center",
+  recentActivity: "Recent notifications", viewNotifications: "All notifications",
+  overviewHint: "Track your purchases, review assignments, and recent updates.",
+  requestsHint: "Review the status and history of your submitted purchases.",
+  approvalsHint: "Review purchase requests that are waiting for your decision.",
+  notificationsHint: "See updates and assignments for your purchase requests.",
+  unread: "Unread", page: "Page", activityChart: "Purchase activity",
+  activityPeriods: "Activity period", months: "months", requestCount: "requests",
 };
 
 const tr: typeof en = {
@@ -60,6 +69,15 @@ const tr: typeof en = {
   processing: "İş akışı durumu güncelleniyor", decisionSaved: "Karar kaydedildi", noManager: "Talep göndermek için bir yönetici atanmalıdır.",
   titleInvalid: "3 ila 120 karakter girin.", descriptionInvalid: "5 ila 2.000 karakter girin.",
   amountInvalid: "En fazla iki ondalık basamaklı pozitif bir tutar girin.", categoryInvalid: "Bir kategori seçin.",
+  operations: "Operasyon", configuration: "Yapılandırma", recentRequests: "Son talepler",
+  requestBreakdown: "Talep durumları", viewRequests: "Tüm talepler", viewApprovals: "Onay merkezi",
+  recentActivity: "Son bildirimler", viewNotifications: "Tüm bildirimler",
+  overviewHint: "Satın alma taleplerini, onay görevlerini ve son güncellemeleri takip edin.",
+  requestsHint: "Gönderdiğiniz satın alma taleplerinin durumunu ve geçmişini inceleyin.",
+  approvalsHint: "Kararınızı bekleyen satın alma taleplerini inceleyin.",
+  notificationsHint: "Satın alma taleplerindeki güncellemeleri ve görev atamalarını görün.",
+  unread: "Okunmadı", page: "Sayfa", activityChart: "Satın alma geçmişi",
+  activityPeriods: "Geçmiş dönemi", months: "ay", requestCount: "talep",
 };
 
 export const messages = { en, tr };

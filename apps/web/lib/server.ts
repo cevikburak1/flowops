@@ -7,7 +7,7 @@ import type { Member } from "./organization";
 export { messages } from "./messages";
 
 export interface Organization { id: string; name: string; slug: string; role: string; currency: string }
-export interface Profile { name: string; organizations: Organization[]; isOperator: boolean }
+export interface Profile { name: string | null; organizations: Organization[]; isOperator: boolean }
 export interface Purchase {
   id: string; title: string; category: string; amount: number; currency: string; status: string; createdAt: string;
 }
@@ -17,6 +17,10 @@ export interface Workspace {
   pendingCount: number;
   statuses: { status: string; count: number }[];
   notifications: { id: string; purchaseId: string; title: string; kind: string; createdAt: string; readAt: string | null }[];
+  notificationPage: number;
+  notificationHasMore: boolean;
+  activity: { year: number; month: number; status: string; count: number }[];
+  asOf: string;
   canSubmit: boolean;
   page: number;
   pageSize: number;

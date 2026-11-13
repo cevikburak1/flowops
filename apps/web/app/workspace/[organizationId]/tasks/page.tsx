@@ -1,13 +1,15 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Shell } from "../../../../components/shell";
+import { Pagination } from "../../../../components/pagination";
 import { label } from "../../../../lib/messages";
 import { getApi, getLocale, messages, type Profile } from "../../../../lib/server";
 import { priorities, taskStatuses, taskText, type TaskPage } from "../../../../lib/tasks";
+import { processText } from "../../../../lib/processes";
 
 export default async function Tasks({ params, searchParams }: {
   params: Promise<{ organizationId: string }>;
-  searchParams: Promise<{ status?: string; priority?: string; page?: string }>;
+  searchParams: Promise<{ status?: string; priority?: string; page?: string; processPage?: string }>;
 }) {
   const [{ organizationId }, query, profile, locale] = await Promise.all([params, searchParams, getApi<Profile>("/api/me"), getLocale()]);
   const organization = profile.organizations.find(item => item.id === organizationId);
@@ -15,19 +17,32 @@ export default async function Tasks({ params, searchParams }: {
   const status = taskStatuses.find(item => item === query.status) ?? "pending";
   const priority = priorities.find(item => item === query.priority);
   const page = typeof query.page === "string" && /^\d{1,5}$/.test(query.page) ? Number(query.page) : 1;
+  const processPage = typeof query.processPage === "string" && /^\d{1,5}$/.test(query.processPage) ? query.processPage : "1";
   const base = `/workspace/${organization.id}`;
   function filters(pageNumber: number) {
     const values = new URLSearchParams({ status, page: String(pageNumber) });
     if (priority) values.set("priority", priority);
     return values.toString();
   }
-  const data = await getApi<TaskPage>(`/api/organizations/${organization.id}/tasks?${filters(page)}`);
+  const [data, processTasks] = await Promise.all([
+    getApi<TaskPage>(`/api/organizations/${organization.id}/tasks?${filters(page)}`),
+    getApi<{ items: { processId: string; runId: string; stepId: string; title: string }[]; page: number; hasMore: boolean }>(
+      `/api/organizations/${organization.id}/process-tasks?page=${processPage}`)
+  ]);
   const t = taskText[locale];
   const common = messages[locale];
   const date = new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" });
 
   return <Shell profile={profile} organization={organization} locale={locale} active="tasks">
     <header className="page-header"><h1>{t.title}</h1></header>
+    {(processTasks.items?.length > 0 || processTasks.page > 1) && <section className="panel detail-panel mb-4">
+      <h2 id="process-tasks">{processText[locale].myTasks}</h2>
+      <ul className="decisions">{processTasks.items.map(task => <li key={`${task.runId}:${task.stepId}`}>
+        <Link className="underline break-words" href={`${base}/processes/${task.processId}?runId=${task.runId}#task-${task.runId}-${task.stepId}`}>{task.title}</Link>
+      </li>)}</ul>
+      <Pagination page={processTasks.page} more={processTasks.hasMore}
+        href={next => `?${filters(data.page)}&processPage=${next}#process-tasks`} locale={locale} label={processText[locale].myTasks} />
+    </section>}
     <section className="panel detail-panel">
       <form className="stack-form" action={`${base}/tasks`}>
         <div className="form-row">
@@ -58,9 +73,6 @@ export default async function Tasks({ params, searchParams }: {
           </table>
         </div>}
     </section>
-    <div className="pager">
-      {data.page > 1 && <Link className="button secondary" href={`?${filters(data.page - 1)}`}>{common.previous}</Link>}
-      {data.hasMore && <Link className="button secondary" href={`?${filters(data.page + 1)}`}>{common.next}</Link>}
-    </div>
+    <Pagination page={data.page} more={data.hasMore} href={next => `?${filters(next)}&processPage=${processPage}`} locale={locale} label={t.title} />
   </Shell>;
 }

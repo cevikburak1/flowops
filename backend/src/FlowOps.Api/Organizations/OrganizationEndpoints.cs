@@ -8,7 +8,8 @@ namespace FlowOps.Api;
 
 internal static class OrganizationEndpoints
 {
-    private static readonly string[] AssignableRoles = ["OrganizationAdmin", "Manager", "Approver", "Employee", "Viewer"];
+    private static readonly string[] AssignableRoles = ["OrganizationAdmin", "Manager", "Approver", "Employee", "Viewer",
+        ProcessEndpoints.Editor, ProcessEndpoints.Operator];
 
     public static void Map(RouteGroupBuilder api, RouteGroupBuilder tenant)
     {
@@ -17,10 +18,12 @@ internal static class OrganizationEndpoints
         tenant.MapPost("/invitations", InviteAsync);
         tenant.MapPost("/invitations/{invitationId:guid}/revoke", RevokeAsync);
         tenant.MapPost("/members/{memberSubject}/settings", UpdateMemberAsync);
+        tenant.MapPost("/members/{memberSubject}/remove", RemoveMemberAsync);
         tenant.MapPost("/groups", SaveGroupAsync);
         tenant.MapPost("/groups/{groupId:guid}", UpdateGroupAsync);
         tenant.MapPost("/routing", UpdateRoutingAsync);
         tenant.MapPost("/integrations/webhook", SetWebhookAsync);
+        tenant.MapPost("/settings/process-permissions", ProcessPermissions.UpdateAsync);
     }
 
     internal static async Task<Organization?> LockAsync(FlowOpsDb db, Guid id, CancellationToken token) =>
@@ -74,7 +77,8 @@ internal static class OrganizationEndpoints
         return Results.Ok(new { Members = members, Groups = groups, Invitations = invitations, organization.FinanceThreshold,
             organization.FinanceApprover, organization.WebhookEnabled,
             WebhookAvailable = !string.IsNullOrEmpty(config["Integrations:Webhook:Url"]),
-            CanAssignAdmin = actor.Role == "OrganizationOwner" });
+            CanAssignAdmin = actor.Role == "OrganizationOwner", ActorSubject = actor.Subject,
+            ProcessPermissions = ProcessPermissions.Read(organization.ProcessPermissions) });
     }
 
     private static async Task<IResult> SetWebhookAsync(Guid organizationId, WebhookInput input, ClaimsPrincipal user,
@@ -148,7 +152,8 @@ internal static class OrganizationEndpoints
             select lead.Subject).FirstOrDefaultAsync(token);
     }
 
-    private static async Task<IResult> InviteAsync(Guid organizationId, InviteInput input, ClaimsPrincipal user, FlowOpsDb db, CancellationToken token)
+    private static async Task<IResult> InviteAsync(Guid organizationId, InviteInput input, ClaimsPrincipal user, FlowOpsDb db,
+        InvitationEmailDelivery emailDelivery, CancellationToken token)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(token);
         var organization = await LockAsync(db, organizationId, token);
@@ -164,15 +169,21 @@ internal static class OrganizationEndpoints
         var now = DateTimeOffset.UtcNow;
         var active = await db.Invitations.Where(x => x.OrganizationId == organizationId && x.Email == email &&
             x.AcceptedAt == null && x.RevokedAt == null && x.ExpiresAt > now).ToListAsync(token);
-        foreach (var previous in active) previous.RevokedAt = now;
+        foreach (var previous in active)
+        {
+            previous.RevokedAt = now;
+            previous.EmailCode = null;
+        }
         var raw = RandomNumberGenerator.GetBytes(32);
         var invitation = new Invitation { OrganizationId = organizationId, Email = email, Role = input.Role!,
             ExpiresAt = now.AddDays(7), TokenHash = Convert.ToHexString(SHA256.HashData(raw)) };
+        var code = WebEncoders.Base64UrlEncode(raw);
+        emailDelivery.Enqueue(invitation, code);
         db.Invitations.Add(invitation);
         Record(db, organizationId, actor.Subject, "invited", email);
         await db.SaveChangesAsync(token);
         await transaction.CommitAsync(token);
-        return Results.Json(new { invitation.Id, Code = WebEncoders.Base64UrlEncode(raw), invitation.ExpiresAt }, statusCode: 201);
+        return Results.Json(new { invitation.Id, Code = code, invitation.ExpiresAt }, statusCode: 201);
     }
 
     private static async Task<IResult> AcceptAsync(AcceptInput input, ClaimsPrincipal user, FlowOpsDb db, CancellationToken token)
@@ -202,6 +213,7 @@ internal static class OrganizationEndpoints
             db.Memberships.Add(new Membership { OrganizationId = invite.OrganizationId, Subject = subject, Email = email, Role = invite.Role });
         invite.AcceptedAt = DateTimeOffset.UtcNow;
         invite.AcceptedBy = subject;
+        invite.EmailCode = null;
         Record(db, invite.OrganizationId, subject, "invitationAccepted", email);
         await db.SaveChangesAsync(token);
         await transaction.CommitAsync(token);
@@ -220,6 +232,7 @@ internal static class OrganizationEndpoints
         if (invitation.RevokedAt is null)
         {
             invitation.RevokedAt = DateTimeOffset.UtcNow;
+            invitation.EmailCode = null;
             Record(db, organizationId, actor.Subject, "invitationRevoked", invitation.Email);
             await db.SaveChangesAsync(token);
             await transaction.CommitAsync(token);
@@ -293,6 +306,51 @@ internal static class OrganizationEndpoints
         organization.FinanceThreshold = threshold;
         organization.FinanceApprover = finance;
         Record(db, organizationId, actor.Subject, "routingUpdated", null);
+        await db.SaveChangesAsync(token);
+        await transaction.CommitAsync(token);
+        return Results.NoContent();
+    }
+
+    private static async Task<IResult> RemoveMemberAsync(Guid organizationId, string memberSubject, ClaimsPrincipal user,
+        FlowOpsDb db, CancellationToken token)
+    {
+        await using var transaction = await db.Database.BeginTransactionAsync(token);
+        var organization = await LockAsync(db, organizationId, token);
+        var actor = await FindAdminAsync(db, organizationId, user, token);
+        if (organization is null || actor is null) return Results.NotFound();
+        var member = await FindMemberAsync(db, organizationId, memberSubject, token);
+        if (member is null) return Results.NoContent();
+        if (member.Subject == actor.Subject || member.Role == "OrganizationOwner" ||
+            (member.Role == "OrganizationAdmin" && actor.Role != "OrganizationOwner"))
+            return Results.Json(new { code = "memberProtected" }, statusCode: 403);
+
+        var approvals = db.Approvals.Where(x => x.OrganizationId == organizationId);
+        var activePurchases = db.Purchases.Where(x => x.OrganizationId == organizationId &&
+            x.Status != "approved" && x.Status != "rejected");
+        if (organization.FinanceApprover == memberSubject ||
+            await (from task in db.ProcessTasks
+                join run in db.ProcessRuns on new { task.OrganizationId, Id = task.RunId } equals new { run.OrganizationId, run.Id }
+                where task.OrganizationId == organizationId && task.Assignee == memberSubject && task.CompletedAt == null &&
+                    run.Status == "running"
+                select task).AnyAsync(token) ||
+            await db.Memberships.AnyAsync(x => x.OrganizationId == organizationId && x.Manager == memberSubject, token) ||
+            await db.OrganizationGroups.AnyAsync(x => x.OrganizationId == organizationId && x.Lead == memberSubject, token) ||
+            await activePurchases.AnyAsync(x =>
+                approvals.Any(a => a.PurchaseId == x.Id && a.Assignee == memberSubject && a.Decision == null) ||
+                (x.Manager == memberSubject && !approvals.Any(a => a.PurchaseId == x.Id && a.Stage == 1)) ||
+                (x.Finance == memberSubject && !approvals.Any(a => a.PurchaseId == x.Id && a.Stage == 2) &&
+                    !approvals.Any(a => a.PurchaseId == x.Id && a.Stage == 1 && a.Decision == "rejected")), token))
+            return Conflict("memberHasAssignments");
+
+        if (member.Email is string email)
+        {
+            var now = DateTimeOffset.UtcNow;
+            await db.Invitations.Where(x => x.OrganizationId == organizationId && x.Email == email &&
+                x.AcceptedAt == null && x.RevokedAt == null).ExecuteUpdateAsync(set =>
+                    set.SetProperty(x => x.RevokedAt, now).SetProperty(x => x.EmailCode, (string?)null), token);
+        }
+        db.Memberships.Remove(member);
+        Record(db, organizationId, actor.Subject, "memberRemoved", member.Subject);
         await db.SaveChangesAsync(token);
         await transaction.CommitAsync(token);
         return Results.NoContent();

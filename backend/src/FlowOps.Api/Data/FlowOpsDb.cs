@@ -19,10 +19,28 @@ internal sealed class FlowOpsDb(DbContextOptions<FlowOpsDb> options) : DbContext
     public DbSet<WorkflowCommand> WorkflowCommands => Set<WorkflowCommand>();
     public DbSet<PurchaseWorkflowDefinition> PurchaseWorkflows => Set<PurchaseWorkflowDefinition>();
     public DbSet<PurchaseWorkflowVersion> PurchaseWorkflowVersions => Set<PurchaseWorkflowVersion>();
+    public DbSet<ProcessDefinition> Processes => Set<ProcessDefinition>();
+    public DbSet<ProcessRun> ProcessRuns => Set<ProcessRun>();
+    public DbSet<ProcessAttachment> ProcessAttachments => Set<ProcessAttachment>();
+    public DbSet<ProcessTask> ProcessTasks => Set<ProcessTask>();
 
     protected override void OnModelCreating(ModelBuilder model)
     {
         model.HasDefaultSchema("flowops");
+        model.Entity<ProcessDefinition>().HasKey(x => new { x.OrganizationId, x.Id });
+        model.Entity<ProcessDefinition>().HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId);
+        model.Entity<ProcessRun>().HasKey(x => new { x.OrganizationId, x.Id });
+        model.Entity<ProcessRun>().HasOne<ProcessDefinition>().WithMany()
+            .HasForeignKey(x => new { x.OrganizationId, Id = x.ProcessId }).OnDelete(DeleteBehavior.Restrict);
+        model.Entity<ProcessRun>().HasIndex(x => x.NextAt).HasFilter("\"Status\" = 'running'");
+        model.Entity<ProcessRun>().HasIndex(x => new { x.OrganizationId, x.ProcessId, x.CreatedAt });
+        model.Entity<ProcessAttachment>().HasKey(x => new { x.OrganizationId, x.RunId });
+        model.Entity<ProcessAttachment>().HasOne<ProcessRun>().WithMany()
+            .HasForeignKey(x => new { x.OrganizationId, Id = x.RunId });
+        model.Entity<ProcessTask>().HasKey(x => new { x.OrganizationId, x.RunId, x.StepId });
+        model.Entity<ProcessTask>().HasOne<ProcessRun>().WithMany()
+            .HasForeignKey(x => new { x.OrganizationId, Id = x.RunId });
+        model.Entity<ProcessTask>().HasIndex(x => new { x.OrganizationId, x.Assignee, x.CompletedAt });
         model.Entity<Organization>().HasIndex(x => x.Slug).IsUnique();
         model.Entity<Organization>().Property(x => x.FinanceThreshold).HasPrecision(14, 2);
         model.Entity<Organization>().Property(x => x.Plan).HasDefaultValue("starter");
@@ -38,6 +56,7 @@ internal sealed class FlowOpsDb(DbContextOptions<FlowOpsDb> options) : DbContext
             .HasForeignKey(x => new { x.OrganizationId, Id = x.DepartmentId }).OnDelete(DeleteBehavior.Restrict);
         model.Entity<Invitation>().HasIndex(x => x.TokenHash).IsUnique();
         model.Entity<Invitation>().HasIndex(x => new { x.OrganizationId, x.ExpiresAt });
+        model.Entity<Invitation>().HasIndex(x => x.EmailNextAttemptAt).HasFilter("\"EmailCode\" IS NOT NULL");
         model.Entity<Invitation>().HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId);
         model.Entity<OrganizationEvent>().HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId);
         model.Entity<OrganizationEvent>().HasIndex(x => new { x.OrganizationId, x.At });
@@ -103,6 +122,7 @@ internal sealed class Organization
     public string Currency { get; init; } = "USD";
     public bool WebhookEnabled { get; set; }
     public string Plan { get; set; } = "starter";
+    public string? ProcessPermissions { get; set; }
 }
 
 internal sealed class Membership
@@ -136,6 +156,9 @@ internal sealed class Invitation
     public DateTimeOffset? AcceptedAt { get; set; }
     public DateTimeOffset? RevokedAt { get; set; }
     public string? AcceptedBy { get; set; }
+    public string? EmailCode { get; set; }
+    public DateTimeOffset? EmailNextAttemptAt { get; set; }
+    public int EmailAttempts { get; set; }
 }
 
 internal sealed class OrganizationEvent

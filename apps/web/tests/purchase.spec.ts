@@ -1,5 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
+import { access, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { createServer } from "node:http";
 
 const workspace = "/workspace/14e41a68-86a8-4653-980c-07e1ec2b0562";
 const organizationApi = "/api/organizations/14e41a68-86a8-4653-980c-07e1ec2b0562";
@@ -14,6 +17,195 @@ async function login(page: Page, user: string) {
   await page.locator("#kc-login").click();
   await expect(page).toHaveURL(/\/workspace\//, { timeout: 30000 });
 }
+
+test("general processes publish, run parallel timers, and protect submitted attachments", async ({ browser, page: owner }) => {
+  test.setTimeout(120000);
+  const editorContext = await browser.newContext();
+  const employee = await editorContext.newPage();
+  const operator = await browser.newPage();
+  const suffix = Date.now();
+  await login(owner, "finance");
+  const created = await owner.request.post("/api/organizations", {
+    headers: { origin }, data: { name: `Processes ${suffix}`, slug: `processes-${suffix}` },
+  });
+  expect(created.status()).toBe(201);
+  const { id: organization } = await created.json();
+  const base = `/api/organizations/${organization}`;
+  const href = `/workspace/${organization}/processes`;
+  await login(employee, "employee");
+  await login(operator, "manager");
+  for (const [account, email, role] of [[employee, "employee@example.test", "ProcessEditor"],
+    [operator, "manager@example.test", "ProcessOperator"]] as const) {
+    const invitation = await owner.request.post(`${base}/invitations`, { headers: { origin }, data: { email, role } });
+    expect(invitation.status()).toBe(201);
+    expect((await account.request.post("/api/invitations/accept", {
+      headers: { origin }, data: { code: (await invitation.json()).code },
+    })).status()).toBe(200);
+  }
+
+  await employee.goto(`${href}?view=new`);
+  await expect(employee.getByRole("heading", { name: "New process" })).toBeVisible();
+  await employee.getByLabel("Process name").fill("Equipment check");
+  await employee.locator("select[name=attachmentMode]").selectOption("required");
+  await employee.getByRole("button", { name: "Add field" }).click();
+  await employee.getByLabel("Field label 1").fill("Reference");
+  await employee.getByLabel("Required", { exact: true }).check();
+  await employee.getByRole("button", { name: "Add parallel branches" }).click();
+  await employee.getByRole("button", { name: "Save draft" }).click();
+  await expect(employee.getByRole("heading", { name: "Equipment check" })).toBeVisible();
+  const processId = new URL(employee.url()).pathname.split("/").at(-1)!;
+  const api = `${base}/processes/${processId}`;
+  expect((await operator.request.get(api)).status()).toBe(404);
+  await employee.getByRole("button", { name: "Publish version" }).click();
+  await expect(employee.getByText("Version 1", { exact: true })).toBeVisible();
+  expect((await employee.request.get(`${base}/settings`)).status()).toBe(404);
+  expect((await operator.request.post(`${api}/publish`, { headers: { origin }, data: { revision: 1 } })).status()).toBe(404);
+  expect((await employee.request.get(`${organizationApi}/processes/${processId}`)).status()).toBe(404);
+  await operator.goto(`${href}/${processId}`);
+  await operator.getByLabel("Reference").fill("EX-42");
+  await operator.getByLabel(/Attachment/).setInputFiles({
+    name: "reference.txt", mimeType: "text/plain", buffer: Buffer.from("test reference"),
+  });
+  await operator.getByRole("button", { name: "Start process" }).click();
+  await expect(operator.getByText("Completed", { exact: true })).toBeVisible({ timeout: 20000 });
+  const detail = await (await operator.request.get(api)).json();
+  expect(detail.runs).toHaveLength(1);
+  const download = `${api}/runs/${detail.runs[0].id}/attachment`;
+  expect((await employee.request.get(download)).status()).toBe(404);
+  const file = await operator.request.get(download);
+  expect(file.status()).toBe(200);
+  expect(await file.text()).toBe("test reference");
+  expect(file.headers()["content-disposition"]).toContain("attachment");
+
+  const advanced = {
+    name: "Assigned review", trigger: "manual", fields: [], attachment: "required",
+    steps: [{ kind: "assignment", title: "Verify receipt", assignee: "" }, { kind: "timer", seconds: 1 }],
+    layout: { "root-0": { x: 124, y: 56 } },
+  };
+  const settings = await (await owner.request.get(`${base}/settings`)).json();
+  advanced.steps[0].assignee = settings.members.find((member: { role: string }) => member.role === "ProcessEditor").subject;
+  const draft = await owner.request.post(`${base}/processes`, { headers: { origin }, data: advanced });
+  expect(draft.status()).toBe(201);
+  const assigned = (await draft.json()).id;
+  const assignedApi = `${base}/processes/${assigned}`;
+  expect((await owner.request.post(`${assignedApi}/publish`, { headers: { origin }, data: { revision: 1 } })).status()).toBe(204);
+  const grants = settings.processPermissions;
+  grants.ProcessOperator.run = false;
+  expect((await employee.request.post(`${base}/settings/process-permissions`, { headers: { origin }, data: grants })).status()).toBe(404);
+  expect((await owner.request.post(`${base}/settings/process-permissions`, { headers: { origin }, data: grants })).status()).toBe(204);
+  const large = !!process.env.FLOWOPS_TEST_PROCESS_STORAGE;
+  const bytes = Buffer.alloc(large ? 10 * 1024 * 1024 : 32, 0x61);
+  const input = { id: crypto.randomUUID(), version: 1, answers: {},
+    attachment: { name: "receipt.bin", content: bytes.toString("base64") } };
+  expect((await operator.request.post(`${assignedApi}/run`, { headers: { origin }, data: input })).status()).toBe(404);
+  grants.ProcessOperator.run = true;
+  expect((await owner.request.post(`${base}/settings/process-permissions`, { headers: { origin }, data: grants })).status()).toBe(204);
+  expect((await operator.request.post(`${assignedApi}/run`, { headers: { origin }, data: input })).status()).toBe(202);
+  expect((await operator.request.post(`${assignedApi}/run`, { headers: { origin }, data: input })).status()).toBe(202);
+  await expect.poll(async () => (await (await employee.request.get(`${base}/process-tasks`)).json())
+    .some((item: { runId: string }) => item.runId === input.id), { timeout: 12000 }).toBe(true);
+  const taskPath = `${assignedApi}/runs/${input.id}/tasks/root-0/complete`;
+  expect((await operator.request.post(taskPath, { headers: { origin }, data: {} })).status()).toBe(404);
+  expect((await owner.request.post(`${base}/members/${advanced.steps[0].assignee}/remove`,
+    { headers: { origin }, data: {} })).status()).toBe(409);
+  const attachment = `${assignedApi}/runs/${input.id}/attachment`;
+  const downloaded = await employee.request.get(attachment);
+  expect(downloaded.status()).toBe(200);
+  expect((await downloaded.body()).equals(bytes)).toBe(true);
+  await employee.goto(`/workspace/${organization}/tasks`);
+  await employee.getByRole("link", { name: "Verify receipt" }).click();
+  await expect(employee.getByRole("region", { name: "Process canvas" })).toBeVisible();
+  const node = employee.locator('[data-id="root-0"]').first();
+  const position = await node.boundingBox();
+  expect(position).not.toBeNull();
+  if (position) {
+    await employee.mouse.move(position.x + position.width / 2, position.y + position.height / 2);
+    await employee.mouse.down();
+    await employee.mouse.move(position.x + position.width / 2 + 45, position.y + position.height / 2 + 35, { steps: 8 });
+    await employee.mouse.up();
+  }
+  await employee.getByRole("button", { name: "Save draft" }).click();
+  await expect(employee.getByText("Draft saved", { exact: true })).toBeVisible();
+  const edited = await (await employee.request.get(assignedApi)).json();
+  expect(edited.draft.layout["root-0"]).not.toEqual(advanced.layout["root-0"]);
+  await employee.getByRole("button", { name: "Complete task" }).click();
+  await expect(employee.getByText("Task completed", { exact: true })).toBeVisible();
+  expect((await employee.request.post(taskPath, { headers: { origin }, data: {} })).status()).toBe(204);
+  await expect.poll(async () => (await (await operator.request.get(assignedApi)).json()).runs[0]?.status,
+    { timeout: 15000 }).toBe("completed");
+
+  const spec = { name: "Webhook intake", trigger: "webhook", fields: [], attachment: "none",
+    steps: [{ kind: "timer", seconds: 1 }] };
+  const hook = await employee.request.post(`${base}/processes`, { headers: { origin }, data: spec });
+  expect(hook.status()).toBe(201);
+  const hookApi = `${base}/processes/${(await hook.json()).id}`;
+  expect((await employee.request.post(`${hookApi}/publish`, { headers: { origin }, data: { revision: 1 } })).status()).toBe(204);
+  const body = { id: crypto.randomUUID(), version: 1, answers: {} };
+  expect((await operator.request.post(`${hookApi}/run`, { headers: { origin }, data: body })).status()).toBe(409);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    expect((await operator.request.post(`${hookApi}/webhook`, { headers: { origin }, data: body })).status()).toBe(202);
+  }
+  await expect.poll(async () => {
+    const { runs } = await (await operator.request.get(hookApi)).json();
+    return runs.map((run: { status: string }) => run.status);
+  }, { timeout: 15000 }).toEqual(["completed"]);
+
+  for (const width of [1440, 1024, 768, 390]) {
+    await employee.setViewportSize({ width, height: 900 });
+    expect(await employee.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+  }
+  expect((await new AxeBuilder({ page: employee }).withTags(["wcag2a", "wcag2aa"]).analyze()).violations).toEqual([]);
+  await employee.getByRole("button", { name: "Switch color theme" }).click();
+  await expect(employee.locator("html")).toHaveAttribute("data-theme", "dark");
+  expect((await new AxeBuilder({ page: employee }).withTags(["wcag2a", "wcag2aa"]).analyze()).violations).toEqual([]);
+  await editorContext.close();
+});
+
+test("process HTTP steps post to the configured target", async ({ page }) => {
+  test.skip(!process.env.FLOWOPS_TEST_PROCESS_HTTP, "A local process HTTP target is required.");
+  const requests: { runId: string; key: string }[] = [];
+  const receiver = createServer((request, response) => {
+    let data = "";
+    request.setEncoding("utf8");
+    request.on("data", chunk => { data += chunk; });
+    request.on("end", () => {
+      try {
+        if (request.method !== "POST" || request.url !== "/receipt") throw new Error();
+        requests.push({ runId: (JSON.parse(data) as { runId: string }).runId, key: String(request.headers["idempotency-key"]) });
+        response.writeHead(204).end();
+      } catch { response.writeHead(400).end(); }
+    });
+  });
+  await new Promise<void>((resolve, reject) => {
+    receiver.once("error", reject);
+    receiver.listen(5084, "127.0.0.1", resolve);
+  });
+  try {
+    await login(page, "finance");
+    const org = "17213e02-c104-49cf-93b5-a625628e5906";
+    const base = `/api/organizations/${org}/processes`;
+    const invalid = await page.request.post(base, { headers: { origin }, data: {
+      name: "HTTP receipt", trigger: "webhook", fields: [], attachment: "none",
+      steps: [{ kind: "http", target: "http://127.0.0.1:5084/receipt" }],
+    } });
+    expect(invalid.status()).toBe(400);
+    const created = await page.request.post(base, { headers: { origin }, data: {
+      name: "HTTP receipt", trigger: "webhook", fields: [], attachment: "none",
+      steps: [{ kind: "parallel", branches: [[{ kind: "timer", seconds: 1 }], [{ kind: "timer", seconds: 2 }]] },
+        { kind: "http", target: "receipt" }],
+    } });
+    expect(created.status()).toBe(201);
+    const api = `${base}/${(await created.json()).id}`;
+    expect((await page.request.post(`${api}/publish`, { headers: { origin }, data: { revision: 1 } })).status()).toBe(204);
+    const id = crypto.randomUUID();
+    expect((await page.request.post(`${api}/webhook`, { headers: { origin }, data: { id, version: 1, answers: {} } })).status()).toBe(202);
+    await expect.poll(async () => (await (await page.request.get(api)).json()).runs[0]?.status,
+      { timeout: 15000 }).toBe("completed");
+    expect(requests).toEqual([{ runId: id, key: `${id.replaceAll("-", "")}-root-1` }]);
+  } finally {
+    await new Promise<void>(resolve => receiver.close(() => resolve()));
+  }
+});
 
 test("public page adapts to four viewport widths and both themes", async ({ page }) => {
   await page.goto("/");
@@ -31,6 +223,7 @@ test("public page adapts to four viewport widths and both themes", async ({ page
 });
 
 test("a persisted purchase reaches manager and finance before completion", async ({ browser }) => {
+  test.setTimeout(150000);
   const employee = await browser.newPage({ viewport: { width: 390, height: 844 } });
   const manager = await browser.newPage();
   const finance = await browser.newPage();
@@ -95,6 +288,20 @@ test("a persisted purchase reaches manager and finance before completion", async
   expect((await manager.request.post(approval, { headers: { origin }, data: { decision: "rejected" } })).status()).toBe(409);
   expect((await manager.request.post(approval, { headers: { origin: "https://example.test" }, data: { decision: "approved" } })).status()).toBe(403);
 
+  const restartDirectory = process.env.FLOWOPS_CI_RESTART_DIRECTORY;
+  if (restartDirectory) {
+    await writeFile(join(restartDirectory, "request"), "", { flag: "wx" });
+    await expect.poll(async () => {
+      try {
+        await access(join(restartDirectory, "ready"));
+        return true;
+      } catch { return false; }
+    }, { timeout: 60000 }).toBe(true);
+    const resumed = await employee.request.get(`${organizationApi}/purchases/${purchaseId}`);
+    expect(resumed.status()).toBe(200);
+    expect(await resumed.json()).toMatchObject({ status: "financeReview" });
+  }
+
   await login(finance, "finance");
   await finance.goto(`${workspace}?view=approvals`);
   await finance.getByRole("link", { name: title }).click();
@@ -119,7 +326,7 @@ test("a persisted purchase reaches manager and finance before completion", async
     return (await response.json()).notifications.find((item: { purchaseId: string }) => item.purchaseId === purchaseId)?.readAt;
   }).toBeTruthy();
   await employee.goto(workspace);
-  await expect(employee.getByRole("link", { name: title })).toBeVisible();
+  await expect(employee.getByRole("row").filter({ hasText: title }).getByRole("link", { name: title })).toBeVisible();
   await expect(employee.getByRole("row").filter({ hasText: title }).getByText("Approved", { exact: true })).toBeVisible();
 });
 
@@ -196,6 +403,22 @@ test("a new organization configures routing and runs an immutable published work
   await expect(invite).toHaveValue(/\/join#[A-Za-z0-9_-]{43}$/);
   const link = await invite.inputValue();
   const code = new URL(link).hash.slice(1);
+  const mailpit = process.env.FLOWOPS_TEST_MAILPIT_ORIGIN;
+  if (mailpit) {
+    await expect.poll(async () => {
+      const list = await owner.request.get(new URL("/api/v1/messages", mailpit).href);
+      if (!list.ok()) return false;
+      const { messages: captured } = await list.json() as {
+        messages: { ID: string; Subject: string; To: { Address: string }[] }[];
+      };
+      for (const message of captured.filter(item => item.Subject === "Your FlowOps invitation" &&
+        item.To.some(recipient => recipient.Address === "employee@example.test"))) {
+        const detail = await owner.request.get(new URL(`/api/v1/message/${message.ID}`, mailpit).href);
+        if (detail.ok() && (await detail.json() as { Text: string }).Text.includes(link)) return true;
+      }
+      return false;
+    }, { timeout: 15000 }).toBe(true);
+  }
 
   await login(manager, "manager");
   const accept = "/api/invitations/accept";
@@ -221,7 +444,7 @@ test("a new organization configures routing and runs an immutable published work
 
   await owner.reload();
   const managerRow = owner.locator(".member-details").filter({ hasText: "manager@example.test" });
-  await managerRow.locator("summary").click();
+  await managerRow.locator(":scope > summary").click();
   await managerRow.getByLabel("Role").selectOption("Manager");
   await managerRow.getByRole("button", { name: "Save" }).click();
   await expect(managerRow.getByText("Saved", { exact: true })).toBeVisible();
@@ -231,7 +454,7 @@ test("a new organization configures routing and runs an immutable published work
   await groups.getByRole("button", { name: "Add group" }).click();
   await expect(groups.getByText("Procurement operations", { exact: true })).toBeVisible();
   const employeeRow = owner.locator(".member-details").filter({ hasText: "employee@example.test" });
-  await employeeRow.locator("summary").click();
+  await employeeRow.locator(":scope > summary").click();
   await employeeRow.locator("select[name=team]").selectOption({ label: "Procurement operations" });
   await employeeRow.getByRole("button", { name: "Save" }).click();
   await expect(employeeRow.getByText("Saved", { exact: true })).toBeVisible();
@@ -448,6 +671,8 @@ test("a new organization configures routing and runs an immutable published work
   await expect.poll(async () => (await (await employee.request.get(financeExecution)).json()).status).toBe("managerReview");
   expect((await owner.request.post(`${financeExecution}/approvals/1`, { headers: { origin }, data: { decision: "approved" } })).status()).toBe(202);
   await expect.poll(async () => (await (await employee.request.get(financeExecution)).json()).status).toBe("financeReview");
+  const removeManager = `${base}/members/${managerSubject}/remove`;
+  expect((await owner.request.post(removeManager, { headers: { origin }, data: {} })).status()).toBe(409);
   expect((await manager.request.post(`${financeExecution}/approvals/2`, { headers: { origin }, data: { decision: "approved" } })).status()).toBe(202);
   await expect.poll(async () => (await (await employee.request.get(financeExecution)).json()).status).toBe("approved");
   expect((await owner.request.post(`${copyApi}/unpublish`, { headers: { origin }, data: { revision: copy.revision } })).status()).toBe(204);
@@ -460,4 +685,40 @@ test("a new organization configures routing and runs an immutable published work
   await owner.locator("select[name=status]").selectOption("archived");
   await owner.getByRole("button", { name: "Apply filters" }).click();
   await expect(owner.getByText("No workflows match these filters.")).toBeVisible();
+
+  const removeEmployee = `${base}/members/${employeeSubject}/remove`;
+  expect((await manager.request.post(removeEmployee, { headers: { origin }, data: {} })).status()).toBe(404);
+  expect((await owner.request.post(`${base}/members/${ownerSubject}/remove`, { headers: { origin }, data: {} })).status()).toBe(403);
+  await owner.setViewportSize({ width: 1440, height: 900 });
+  await owner.goto(settings);
+  await employeeRow.locator(":scope > summary").click();
+  const removeControl = employeeRow.getByText("Remove member", { exact: true });
+  await removeControl.focus();
+  await expect(removeControl).toBeFocused();
+  await owner.keyboard.press("Enter");
+  await expect(employeeRow.getByRole("button", { name: "Confirm removal" })).toBeVisible();
+  await employeeRow.getByRole("button", { name: "Confirm removal" }).click();
+  await expect(employeeRow).toHaveCount(0);
+  expect((await employee.request.get(`${base}/workspace`)).status()).toBe(404);
+  expect((await employee.request.post(accept, { headers: { origin }, data: { code } })).status()).toBe(400);
+  expect((await owner.request.post(removeEmployee, { headers: { origin }, data: {} })).status()).toBe(204);
+
+  await owner.goto(`/workspace/${id}/reports?days=7&auditSource=organization`);
+  await expect(owner.getByText("Member removed", { exact: true })).toBeVisible();
+  await owner.getByRole("group", { name: "Event source" }).getByRole("link", { name: "Purchases" }).click();
+  await expect(owner.getByText("Member removed", { exact: true })).toHaveCount(0);
+  const audit = await (await owner.request.get(`${base}/reports?auditPage=10000&auditSource=organization`)).json();
+  expect(audit).toMatchObject({ audit: [], auditPage: 10000, auditHasMore: false });
+  expect((await owner.request.get(`${base}/reports?auditSource=unknown`)).status()).toBe(400);
+  for (let index = 0; index < 12; index++) {
+    expect((await owner.request.post(`${base}/routing`, { headers: { origin }, data: { threshold: 1000 + index } })).status()).toBe(204);
+  }
+  await owner.goto(`/workspace/${id}/reports?days=7&auditSource=organization`);
+  const pager = owner.getByRole("navigation", { name: "Audit log pagination" });
+  const firstRow = await owner.getByRole("region", { name: "Audit log" }).locator("tbody tr").first().textContent();
+  await pager.getByRole("link", { name: "Next" }).click();
+  await expect(owner).toHaveURL(/auditPage=2/);
+  await expect(owner.getByRole("region", { name: "Audit log" }).locator("tbody tr").first()).not.toHaveText(firstRow ?? "");
+  await pager.getByRole("link", { name: "Previous" }).click();
+  await expect(owner).toHaveURL(/auditPage=1/);
 });

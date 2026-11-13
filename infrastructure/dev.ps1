@@ -57,6 +57,12 @@ $env:ASPNETCORE_URLS = 'http://127.0.0.1:5080'
 $env:ConnectionStrings__FlowOps = "Host=localhost;Port=55432;Database=flowops;Username=flowops;Password=$($config.POSTGRES_PASSWORD)"
 $env:Auth__ClientSecret = $config.FLOWOPS_OIDC_SECRET
 $env:FlowOps__SeedDevelopment = 'true'
+if (!$env:Processes__Storage__Endpoint -and $config.OBJECT_STORAGE_SECRET) {
+    $env:Processes__Storage__Endpoint = 'http://127.0.0.1:58333'
+    $env:Processes__Storage__Bucket = 'flowops-dev'
+    $env:Processes__Storage__AccessKey = 'flowops-dev'
+    $env:Processes__Storage__SecretKey = $config.OBJECT_STORAGE_SECRET
+}
 if (!$env:Integrations__RabbitMq) {
     $rabbitPassword = [Uri]::EscapeDataString($config.RABBITMQ_PASSWORD)
     $env:Integrations__RabbitMq = "amqp://flowops:${rabbitPassword}@localhost:55672"

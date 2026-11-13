@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "./ui/button";
+import { Pagination } from "./pagination";
 import { organizationError, organizationText, roles, type Member, type OrganizationSettings, type OrganizationGroup } from "../lib/organization";
 import type { Locale } from "../lib/messages";
 import { plans, reportText, type Plan } from "../lib/reports";
@@ -99,8 +100,9 @@ export function ChangePlan({ locale, id, name, plan }: { locale: Locale; id: str
   </SettingsForm>;
 }
 
-export function Settings({ data, base, currency, locale }: {
+export function Settings({ data, base, currency, locale, pages }: {
   data: OrganizationSettings; base: string; currency: string; locale: Locale;
+  pages: { members: number; invitations: number; groups: number };
 }) {
   const t = organizationText[locale];
   const router = useRouter();
@@ -109,13 +111,23 @@ export function Settings({ data, base, currency, locale }: {
   const assignable = roles.filter(role => data.canAssignAdmin || role !== "OrganizationAdmin");
   const managers = data.members.filter(member => ["OrganizationOwner", "OrganizationAdmin", "Manager"].includes(member.role));
   const approvers = data.members.filter(member => member.role === "Approver");
+  const size = 8;
+  const list = <T,>(key: keyof typeof pages, items: T[]) => {
+    const page = Math.min(pages[key], Math.max(1, Math.ceil(items.length / size)));
+    return { items: items.slice((page - 1) * size, page * size), page, more: items.length > page * size };
+  };
+  const members = list("members", data.members);
+  const invitations = list("invitations", data.invitations);
+  const groups = list("groups", data.groups);
+  const pageLink = (key: keyof typeof pages, page: number) =>
+    `?${new URLSearchParams({ members: String(members.page), invitations: String(invitations.page), groups: String(groups.page), [key]: String(page) })}#settings-${key}`;
 
   return <div className="detail-grid">
     <div className="detail-main">
       <section className="panel detail-panel">
-        <h2>{t.members}</h2>
+        <h2 id="settings-members">{t.members}</h2>
         <ul className="decisions">
-          {data.members.map(member => {
+          {members.items.map(member => {
             const locked = !data.canAssignAdmin && ["OrganizationOwner", "OrganizationAdmin"].includes(member.role);
             const identity = <><span>{memberLabel(member)}</span><span className="status">{t[member.role]}</span></>;
             if (locked) return <li key={member.subject} className="member-identity">{identity}</li>;
@@ -150,14 +162,25 @@ export function Settings({ data, base, currency, locale }: {
                     </label>)}
                   </div>
                 </SettingsForm>
+                {member.role !== "OrganizationOwner" && member.subject !== data.actorSubject &&
+                  <details className="mt-3">
+                    <summary>{t.remove}</summary>
+                    <SettingsForm locale={locale} submit={t.confirmRemove} action={async () => {
+                      await post(`${base}/members/${encodeURIComponent(member.subject)}/remove`, {});
+                      router.refresh();
+                    }}>
+                      <p>{t.removeHint}</p>
+                    </SettingsForm>
+                  </details>}
               </details>
             </li>;
           })}
         </ul>
+        <Pagination page={members.page} more={members.more} href={next => pageLink("members", next)} locale={locale} label={t.members} />
       </section>
       <section className="panel detail-panel">
-        <h2>{t.pending}</h2>
-        <ul className="decisions">{data.invitations.map(invitation => <li key={invitation.id}>
+        <h2 id="settings-invitations">{t.pending}</h2>
+        <ul className="decisions">{invitations.items.map(invitation => <li key={invitation.id}>
           <h3>{invitation.email}</h3>
           <p className="muted">{t[invitation.role]}</p>
           <p className="muted">{t.expires} <time dateTime={invitation.expiresAt}>
@@ -169,9 +192,29 @@ export function Settings({ data, base, currency, locale }: {
           }} />
         </li>)}</ul>
         {data.invitations.length === 0 && <p className="muted">{t.noInvites}</p>}
+        <Pagination page={invitations.page} more={invitations.more} href={next => pageLink("invitations", next)} locale={locale} label={t.pending} />
       </section>
     </div>
     <div className="detail-main">
+      {data.canAssignAdmin && <section className="panel detail-panel settings-panel">
+        <h2>{t.processPermissions}</h2>
+        <SettingsForm locale={locale} action={async fields => {
+          const grants = Object.fromEntries(Object.keys(data.processPermissions).map(role => [role, {
+            edit: fields.has(`${role}.edit`), run: fields.has(`${role}.run`), inspect: fields.has(`${role}.inspect`)
+          }]));
+          await post(`${base}/settings/process-permissions`, grants);
+          router.refresh();
+        }}>
+          {Object.entries(data.processPermissions).map(([role, grant]) => <fieldset key={role} className="min-w-0">
+            <legend className="font-medium">{t[role as Member["role"]]}</legend>
+            <div className="flex flex-wrap gap-3">
+              {([["edit", t.editProcess], ["run", t.runProcess], ["inspect", t.inspectProcess]] as const).map(([key, title]) =>
+                <label key={key} className="!flex items-center"><input type="checkbox" className="!w-auto"
+                  name={`${role}.${key}`} defaultChecked={grant[key]} />{title}</label>)}
+            </div>
+          </fieldset>)}
+        </SettingsForm>
+      </section>}
       <section className="panel detail-panel settings-panel">
         <h2>{t.integrations}</h2>
         {data.webhookAvailable || data.webhookEnabled ? <SettingsForm locale={locale} action={async fields => {
@@ -182,11 +225,12 @@ export function Settings({ data, base, currency, locale }: {
         </SettingsForm> : <p className="muted">{t.webhookUnavailable}</p>}
       </section>
       <section className="panel detail-panel settings-panel">
-        <h2>{t.groups}</h2>
-        {data.groups.map(group => <details key={group.id} className="member-details">
+        <h2 id="settings-groups">{t.groups}</h2>
+        {groups.items.map(group => <details key={group.id} className="member-details">
           <summary><span>{group.name}</span><span className="status">{t[group.kind]}</span></summary>
           <GroupForm group={group} base={base} managers={managers} locale={locale} />
         </details>)}
+        <Pagination page={groups.page} more={groups.more} href={next => pageLink("groups", next)} locale={locale} label={t.groups} />
         <GroupForm base={base} managers={managers} locale={locale} />
       </section>
       <section className="panel detail-panel settings-panel">

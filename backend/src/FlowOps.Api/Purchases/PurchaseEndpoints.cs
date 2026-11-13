@@ -31,6 +31,7 @@ internal static class PurchaseEndpoints
         OrganizationEndpoints.Map(api, tenant);
         ReportingEndpoints.Map(api, tenant);
         WorkflowCatalog.Map(tenant);
+        ProcessEndpoints.Map(tenant);
         ApprovalAssignments.Map(tenant);
         tenant.MapGet("/workspace", GetWorkspaceAsync);
         tenant.MapGet("/tasks", GetTasksAsync);
@@ -74,13 +75,15 @@ internal static class PurchaseEndpoints
         return Results.Created($"/api/organizations/{id}/workspace", new { Id = id, Name = name, Slug = slug });
     }
 
-    private static async Task<IResult> GetWorkspaceAsync(Guid organizationId, int? page, ClaimsPrincipal user, FlowOpsDb db, CancellationToken token)
+    private static async Task<IResult> GetWorkspaceAsync(Guid organizationId, int? page, int? notificationPage, int? months,
+        ClaimsPrincipal user, FlowOpsDb db, CancellationToken token)
     {
         var subject = Subject(user);
         var member = await MembershipAsync(db, organizationId, subject, token);
         if (member is null) return Results.NotFound();
-        const int pageSize = 20;
+        const int pageSize = 10;
         var pageNumber = Math.Clamp(page ?? 1, 1, 10000);
+        var currentNotifications = Math.Clamp(notificationPage ?? 1, 1, 10000);
         var owned = db.Purchases.AsNoTracking().Where(x => x.OrganizationId == organizationId && x.Requester == subject);
         var pending = db.Approvals.AsNoTracking().Where(x => x.OrganizationId == organizationId && x.Assignee == subject && x.Decision == null);
         var pendingCount = await pending.CountAsync(token);
@@ -97,10 +100,21 @@ internal static class PurchaseEndpoints
             where notification.OrganizationId == organizationId && notification.Recipient == subject
             orderby notification.CreatedAt descending, notification.Id
             select new { notification.Id, notification.PurchaseId, purchase.Title, notification.Kind, notification.CreatedAt, notification.ReadAt })
-            .Take(20).ToListAsync(token);
+            .Skip((currentNotifications - 1) * pageSize).Take(pageSize + 1).ToListAsync(token);
+        var now = DateTimeOffset.UtcNow;
+        var monthStart = new DateTimeOffset(now.Year, now.Month, 1, 0, 0, 0, TimeSpan.Zero);
+        var period = months is 6 or 12 or 48 ? months.Value : 0;
+        var since = monthStart.AddMonths(1 - period);
+        var activity = period == 0 ? [] : await owned
+            .Where(x => x.CreatedAt >= since && x.CreatedAt <= now)
+            .GroupBy(x => new { x.CreatedAt.Year, x.CreatedAt.Month, x.Status })
+            .Select(group => new MonthlyActivity(group.Key.Year, group.Key.Month, group.Key.Status, group.Count()))
+            .ToListAsync(token);
         var canSubmit = SubmissionRoles.Contains(member.Role) && await OrganizationEndpoints.ResolveManagerAsync(db, member, token) is not null;
         return Results.Ok(new { Purchases = purchases, Approvals = queue, PendingCount = pendingCount,
-            Statuses = statuses, Notifications = notifications, CanSubmit = canSubmit, Page = pageNumber, PageSize = pageSize });
+            Statuses = statuses, Notifications = notifications.Take(pageSize), NotificationPage = currentNotifications,
+            NotificationHasMore = notifications.Count > pageSize, Activity = activity, AsOf = now,
+            CanSubmit = canSubmit, Page = pageNumber, PageSize = pageSize });
     }
 
     private static async Task<IResult> GetTasksAsync(Guid organizationId, string? status, string? priority, int? page,
@@ -121,7 +135,7 @@ internal static class PurchaseEndpoints
             _ => approvals.Where(x => x.Decision == null)
         };
 
-        const int pageSize = 20;
+        const int pageSize = 10;
         var current = Math.Clamp(page ?? 1, 1, 10000);
         var query = from approval in approvals
             join purchase in db.Purchases.AsNoTracking()
@@ -317,3 +331,4 @@ internal sealed record OrganizationInput(string? Name, string? Slug);
 internal sealed record PurchaseInput(Guid Id, string? Title, string? Description, string? Category, string? Currency, decimal Amount,
     Guid? WorkflowId = null, int? WorkflowVersion = null, string? Priority = null);
 internal sealed record DecisionInput(string? Decision, string? Comment);
+internal sealed record MonthlyActivity(int Year, int Month, string Status, int Count);

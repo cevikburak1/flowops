@@ -12,10 +12,15 @@ internal static class ReportingEndpoints
         api.MapPost("/platform/organizations/{organizationId:guid}/plan", SetPlanAsync);
     }
 
-    private static async Task<IResult> ReportAsync(Guid organizationId, int? days, ClaimsPrincipal user, FlowOpsDb db,
+    private static async Task<IResult> ReportAsync(Guid organizationId, int? days, int? auditPage, string? auditSource,
+        ClaimsPrincipal user, FlowOpsDb db,
         CancellationToken token)
     {
         if (await OrganizationEndpoints.FindAdminAsync(db, organizationId, user, token) is null) return Results.NotFound();
+        if (auditSource is not (null or "organization" or "purchase"))
+            return Results.BadRequest(new { code = "invalidFilter" });
+        const int auditPageSize = 12;
+        var currentAuditPage = Math.Clamp(auditPage ?? 1, 1, 10000);
         var window = days is 7 or 90 ? days.Value : 30;
         var since = DateTimeOffset.UtcNow.AddDays(-window);
         var purchases = db.Purchases.AsNoTracking().Where(x => x.OrganizationId == organizationId && x.CreatedAt >= since);
@@ -32,8 +37,14 @@ internal static class ReportingEndpoints
             .Select(x => new { x.Id, x.Actor, x.Action, x.Target, x.At });
         var purchaseEvents = db.Audit.Where(x => x.OrganizationId == organizationId && x.At >= since)
             .Select(x => new { x.Id, x.Actor, x.Action, Target = (string?)x.PurchaseId.ToString(), x.At });
-        var audit = await organizationEvents.Concat(purchaseEvents).OrderByDescending(x => x.At).ThenBy(x => x.Id)
-            .Take(50).ToListAsync(token);
+        var auditQuery = auditSource switch
+        {
+            "organization" => organizationEvents,
+            "purchase" => purchaseEvents,
+            _ => organizationEvents.Concat(purchaseEvents)
+        };
+        var audit = await auditQuery.OrderByDescending(x => x.At).ThenBy(x => x.Id)
+            .Skip((currentAuditPage - 1) * auditPageSize).Take(auditPageSize + 1).ToListAsync(token);
         var deliveries = await (from delivery in db.NotificationDeliveries
             join notification in db.Notifications on delivery.NotificationId equals notification.Id
             where notification.OrganizationId == organizationId && delivery.CompletedAt == null && delivery.Attempts > 0
@@ -42,7 +53,8 @@ internal static class ReportingEndpoints
             select new { Channel = channel.Key, Count = channel.Count(), NextAttemptAt = channel.Min(x => x.NextAttemptAt) })
             .ToListAsync(token);
         return Results.Ok(new { Days = window, Statuses = statuses, Overdue = overdue, Members = members,
-            Workflows = workflows, Plan = plan, Audit = audit, Deliveries = deliveries });
+            Workflows = workflows, Plan = plan, Audit = audit.Take(auditPageSize), AuditPage = currentAuditPage,
+            AuditHasMore = audit.Count > auditPageSize, Deliveries = deliveries });
     }
 
     internal static bool IsOperator(ClaimsPrincipal user, IConfiguration config) =>
@@ -52,7 +64,7 @@ internal static class ReportingEndpoints
         CancellationToken token)
     {
         if (!IsOperator(user, config)) return Results.NotFound();
-        const int limit = 25;
+        const int limit = 10;
         var current = Math.Clamp(page ?? 1, 1, 10000);
         var organizations = await db.Organizations.AsNoTracking().OrderBy(x => x.Name).ThenBy(x => x.Id)
             .Skip((current - 1) * limit).Take(limit + 1)
@@ -66,7 +78,7 @@ internal static class ReportingEndpoints
         IConfiguration config, FlowOpsDb db, CancellationToken token)
     {
         if (!IsOperator(user, config)) return Results.NotFound();
-        if (input.Plan is not ("starter" or "business" or "enterprise"))
+        if (input.Plan is null || !PlanEntitlements.IsKnownPlan(input.Plan))
             return Results.BadRequest(new { code = "invalidPlan" });
         await using var transaction = await db.Database.BeginTransactionAsync(token);
         var organization = await OrganizationEndpoints.LockAsync(db, organizationId, token);

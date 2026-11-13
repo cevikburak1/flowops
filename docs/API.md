@@ -21,7 +21,7 @@ The frontend forwards same-origin requests to ASP.NET Core. Authenticated writes
 | POST | /api/organizations/{org}/workflows/{id}/unpublish | Pause new submissions using the current draft revision |
 | POST | /api/organizations/{org}/workflows/{id}/duplicate | Copy the saved settings to a new draft using `name` and `revision` |
 | POST | /api/organizations/{org}/workflows/{id}/archive | Archive a workflow and stop new submissions |
-| GET | /api/organizations/{org}/workspace | Paginated personal requests and assigned approvals with current counts and notifications |
+| GET | /api/organizations/{org}/workspace | Personal requests and assigned approvals use `page`. Notifications use `notificationPage` and return `notificationHasMore`. Each list shows up to 10 items. Optional `months=6\|12\|48` adds personal purchase counts by UTC month and status. |
 | GET | /api/organizations/{org}/tasks | Paginated approval tasks assigned to the current member. Filter with `status=pending|overdue|completed`, `priority=low|normal|high`, and `page` |
 | POST | /api/organizations/{org}/purchases | Submit a purchase using a client-generated UUID for retries |
 | GET | /api/organizations/{org}/purchases/{id} | Purchase, decision stages, and audit history |
@@ -46,8 +46,25 @@ Workflow detail returns the draft `graph`. Create and draft update accept an opt
 | `POST /api/organizations/{org}/groups/{groupId}` | Updates a group's name and approval lead. Group kind is fixed. |
 | `POST /api/organizations/{org}/purchases/{id}/approvals/{stage}/assign` | Owner or administrator sends `assignee` and `expectedAssignee`. Stale assignments or completed decisions return 409. |
 | `POST /api/organizations/{org}/integrations/webhook` | Owner or administrator enables or disables delivery to the operator-configured destination using `enabled`. |
-| `GET /api/organizations/{org}/reports?days=30` | Owner or administrator receives aggregates, recent audit events, and current notification retries. Supported windows are 7, 30, and 90 days. |
+| `POST /api/organizations/{org}/members/{subject}/remove` | Owner or administrator removes a member. Owners and the caller are protected. Only an owner can remove an administrator. Returns 409 while the member has active assignments or is part of approval routing. Repeating a successful removal returns 204. |
+| `GET /api/organizations/{org}/reports?days=30` | Owner or administrator receives aggregates, audit events, and current notification retries. Supported windows are 7, 30, and 90 days. Optional `auditSource=organization` or `auditSource=purchase` filters the events. `auditPage` starts at 1 and returns up to 12 events per page, with `auditHasMore` indicating whether another page exists. |
 | `GET /api/platform/organizations?page=1` | Configured platform operator lists organizations and usage. |
 | `POST /api/platform/organizations/{org}/plan` | Configured platform operator sets `plan` to `starter`, `business`, or `enterprise`. |
 
 Member updates accept an optional `groups` object with `teamId` and `departmentId`. A direct manager takes precedence over a team lead, followed by a department lead. Reassignment starts a new 48-hour window and records the actor and assignee. The notification hub sends a refresh signal to the authenticated recipient. Notification data is fetched separately and scoped to the organization.
+
+Member removal revokes organization access and outstanding invitations for that address. Purchase records and historical approvals remain available to authorized users.
+
+If the organization reaches its configured limit of non-archived workflows, create and duplicate return HTTP 409 with code `workflowPlanLimit`.
+
+## General processes
+
+Routes under `/api/organizations/{org}/processes` support listing, creating, viewing, saving drafts, and publishing. Draft and publish writes use the current revision. The `/{processId}/run` and `/{processId}/webhook` endpoints accept a client-generated UUID, the current published version, an answers object keyed by form field, and an optional attachment with `name` and base64 `content`. Repeat the same UUID and payload to retry a submission without starting another run.
+
+The process catalog accepts `page` and returns up to 10 definitions. Process detail accepts `page` for run history and returns up to eight runs with their tasks. Purchase workflow detail accepts `page` for runs and `versionPage` for published versions.
+
+Use the organization session or a Keycloak access token for the webhook endpoint. The token's subject must have permission to start runs in the organization. Download via `/{processId}/runs/{runId}/attachment` as the submitter, an assigned participant, or a member with permission to view all runs. With S3 configured, attachments can be up to 10 MiB. Otherwise the limit is 1 MiB.
+
+`GET /api/organizations/{org}/process-tasks` lists pending assignments for the caller. Pass `page` to receive a page of up to 10 assignments with `page` and `hasMore`. Complete via `POST /{processId}/runs/{runId}/tasks/{stepId}/complete` under the process route. Only the assignee can complete a task. Repeating completion returns 204.
+
+`POST /api/organizations/{org}/settings/process-permissions` accepts the role-to-permission map returned by organization settings. The owner controls the `edit`, `run`, and `inspect` flags for configurable roles.

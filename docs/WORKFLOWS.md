@@ -22,3 +22,11 @@ The purchase workflow editor stores a versioned graph alongside the draft. It su
 Manager decision reads the actual manager approval outcome. Finance threshold uses the finance assignment resolved when the request was submitted and sends rejected requests past finance. Notify requester creates one in-app notification per execution. The purchase detail draws the published snapshot and marks node states using Elsa activity records.
 
 Use the catalog search to match workflow names. Owners and administrators can filter drafts, published, unpublished, and archived workflows. Unpublishing hides the workflow from members and stops new submissions while preserving versions and active executions. Publishing again creates a new numbered version. Duplicating creates an independent draft with the saved finance threshold and a name chosen by the administrator.
+
+## General processes
+
+Open **Processes** to create a draft with a manual form or an authenticated webhook trigger. Add text, number and date fields, and optionally require one attachment up to 10 MiB with S3 storage configured. Published revisions compile into Elsa sequences. Parallel groups wait for all branches, and timer and assignment bookmarks persist in PostgreSQL. A run keeps the published definition it started with. Drag nodes to arrange the canvas and use the step controls to change execution order.
+
+The HTTP step sends a POST with the organization ID, run ID, and step ID. A named target is configured by the operator using `Processes__Targets__<name>`. Use HTTPS in production. Receivers can deduplicate using the `Idempotency-Key` header. Form answers and attachment contents remain in PostgreSQL.
+
+Organization owners can configure edit and publish, start runs, and view all runs separately for each member role. Owners and administrators retain all process permissions. Assigned members can open their tasks from **My tasks**, access the associated run and attachment, and resume Elsa by completing the task. Other participants can access their own submissions. The API checks organization membership on each request.

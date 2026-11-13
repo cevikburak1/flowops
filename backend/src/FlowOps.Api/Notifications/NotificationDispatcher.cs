@@ -1,4 +1,3 @@
-using System.Net;
 using System.Net.Http.Json;
 using System.Net.Mail;
 using System.Text.Json;
@@ -104,12 +103,9 @@ internal sealed class NotificationDispatcher(
                 break;
             case "email" when member.Email is not null:
                 var smtp = config.GetSection("Integrations:Smtp");
-                using (var client = new SmtpClient(smtp["Host"]!, smtp.GetValue("Port", 587)))
+                using (var client = SmtpDelivery.CreateClient(smtp))
                 using (var mail = new MailMessage(smtp["From"]!, member.Email))
                 {
-                    client.EnableSsl = smtp.GetValue("Tls", true);
-                    if (smtp["User"] is { Length: > 0 } user)
-                        client.Credentials = new NetworkCredential(user, smtp["Password"]);
                     mail.Subject = "FlowOps purchase update";
                     var origin = config["Auth:WebOrigin"] ?? "http://localhost:3000";
                     mail.Body = $"Open FlowOps to review this update.\n{origin.TrimEnd('/')}/workspace/{payload.OrganizationId}/purchases/{payload.PurchaseId}";

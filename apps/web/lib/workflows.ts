@@ -10,6 +10,7 @@ const en = {
   runs: "Purchase executions", noWorkflows: "Published purchase workflows will appear here.",
   noVersions: "Publish the draft to make it available for new requests.", noRuns: "No requests have used this workflow yet.",
   use: "Submit a request", settings: "Draft settings", changed: "The workflow changed. Reload the page and try again.",
+  planLimit: "This organization has reached its workflow limit. Archive a workflow or contact your administrator.",
   invalid: "Enter a workflow name and a valid finance threshold.", failed: "The workflow could not be saved. Try again.",
   saved: "Draft saved", saveBeforePublish: "Save your changes before publishing.",
   search: "Search by name", filter: "Status", all: "All statuses", apply: "Apply filters", clear: "Clear filters",
@@ -28,6 +29,7 @@ const tr: typeof en = {
   runs: "Satın alma yürütmeleri", noWorkflows: "Yayınlanan satın alma akışları burada görünür.",
   noVersions: "Yeni taleplerde kullanılabilmesi için taslağı yayınlayın.", noRuns: "Henüz bu akışı kullanan talep yok.",
   use: "Talep gönder", settings: "Taslak ayarları", changed: "İş akışı değişti. Sayfayı yenileyip tekrar deneyin.",
+  planLimit: "Kuruluş iş akışı sınırına ulaştı. Bir iş akışını arşivleyin veya yöneticinize başvurun.",
   invalid: "İş akışı adını ve geçerli bir finans eşiğini girin.", failed: "İş akışı kaydedilemedi. Tekrar deneyin.",
   saved: "Taslak kaydedildi", saveBeforePublish: "Yayınlamadan önce değişiklikleri kaydedin.",
   search: "Ada göre ara", filter: "Durum", all: "Tüm durumlar", apply: "Filtrele", clear: "Filtreleri temizle",
@@ -51,6 +53,9 @@ export interface WorkflowDetail extends WorkflowItem, WorkflowPage {
   graph: PurchaseGraph;
   revision: number;
   financeThreshold: number;
+  versionPage: number;
+  versionsHaveMore: boolean;
+  runsHaveMore: boolean;
   versions: { number: number; name: string; financeThreshold: number; publishedAt: string }[];
   runs: { id: string; title: string; status: string; workflowVersion: number; createdAt: string }[];
 }

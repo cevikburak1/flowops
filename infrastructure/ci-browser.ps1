@@ -2,8 +2,11 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $api = $null
 $web = $null
-function Wait-Http($address) {
+$tests = $null
+$restartDirectory = $null
+function Wait-Http($address, $process) {
     for ($attempt = 0; $attempt -lt 60; $attempt++) {
+        if ($process.HasExited) { throw "Service process exited before readiness at $address" }
         try {
             if ((Invoke-WebRequest -Uri $address -TimeoutSec 10).StatusCode -eq 200) { return }
         } catch {
@@ -17,15 +20,48 @@ Push-Location $root
 try {
     $processOptions = @{ FilePath = 'pwsh'; PassThru = $true }
     if ([System.Environment]::OSVersion.Platform -eq 'Win32NT') { $processOptions.WindowStyle = 'Hidden' }
+    $restartDirectory = Join-Path ([System.IO.Path]::GetTempPath()) "flowops-ci-$([Guid]::NewGuid())"
+    New-Item -ItemType Directory -Path $restartDirectory | Out-Null
+    $env:FLOWOPS_CI_RESTART_DIRECTORY = $restartDirectory
     $api = Start-Process @processOptions -ArgumentList '-NoProfile', '-File', './infrastructure/dev.ps1', 'api'
-    $web = Start-Process @processOptions -ArgumentList '-NoProfile', '-File', './infrastructure/dev.ps1', 'web'
-    Wait-Http 'http://127.0.0.1:5080/health/ready'
-    Wait-Http 'http://127.0.0.1:3000/'
-    ./infrastructure/dev.ps1 test
-    if ($LASTEXITCODE -ne 0) { throw "Playwright exited with code $LASTEXITCODE" }
+    $webOptions = @{ FilePath = 'node'; PassThru = $true; WorkingDirectory = (Join-Path $root 'apps/web') }
+    if ($processOptions.ContainsKey('WindowStyle')) { $webOptions.WindowStyle = $processOptions.WindowStyle }
+    $web = Start-Process @webOptions -ArgumentList 'node_modules/next/dist/bin/next', 'dev', '--hostname', '127.0.0.1', '--port', '3000'
+    Wait-Http 'http://127.0.0.1:5080/health/ready' $api
+    Wait-Http 'http://127.0.0.1:3000/' $web
+    $testOutput = Join-Path $restartDirectory 'playwright.stdout'
+    $testErrors = Join-Path $restartDirectory 'playwright.stderr'
+    $tests = Start-Process @processOptions -ArgumentList '-NoProfile', '-File', './infrastructure/dev.ps1', 'test' `
+        -RedirectStandardOutput $testOutput -RedirectStandardError $testErrors
+    $restarted = $false
+    while (!$tests.WaitForExit(250)) {
+        if (!$restarted -and (Test-Path -LiteralPath (Join-Path $restartDirectory 'request'))) {
+            if ($api.HasExited) { throw 'API exited before the requested restart' }
+            $api.Kill($true)
+            if (!$api.WaitForExit(10000)) { throw 'API process did not exit' }
+            $api = Start-Process @processOptions -ArgumentList '-NoProfile', '-File', './infrastructure/dev.ps1', 'api'
+            Wait-Http 'http://127.0.0.1:5080/health/ready' $api
+            New-Item -ItemType File -Path (Join-Path $restartDirectory 'ready') | Out-Null
+            $restarted = $true
+            Write-Output 'Restarted the FlowOps API during the pending finance approval.'
+        }
+    }
+    if ($tests.ExitCode -ne 0) { throw "Playwright exited with code $($tests.ExitCode)" }
+    if (!$restarted) { throw 'Playwright did not exercise the API restart' }
 } finally {
-    foreach ($process in @($api, $web)) {
+    foreach ($process in @($tests, $api, $web)) {
         if ($process -and !$process.HasExited) { $process.Kill($true) }
     }
+    if ($restartDirectory) {
+        foreach ($output in @($testOutput, $testErrors)) {
+            if ($output -and (Test-Path -LiteralPath $output)) { Get-Content -LiteralPath $output }
+        }
+        foreach ($file in 'request', 'ready', 'playwright.stdout', 'playwright.stderr') {
+            $marker = Join-Path $restartDirectory $file
+            if (Test-Path -LiteralPath $marker) { Remove-Item -LiteralPath $marker }
+        }
+        Remove-Item -LiteralPath $restartDirectory
+    }
+    Remove-Item Env:FLOWOPS_CI_RESTART_DIRECTORY -ErrorAction SilentlyContinue
     Pop-Location
 }
