@@ -26,7 +26,7 @@ export default async function ReportPage({ params, searchParams }: {
       <div><dt>{t.members}</dt><dd>{number.format(data.members)}</dd></div>
       <div><dt>{t.workflows}</dt><dd>{number.format(data.workflows)}</dd></div>
     </dl>
-    <div className="flex flex-wrap items-center gap-2 mb-4" role="group" aria-label={t.period}>
+    <div className="report-period flex flex-wrap items-center gap-2 mb-4" role="group" aria-label={t.period}>
       {[7, 30, 90].map(period => <Link key={period} href={`?days=${period}`}
         className={period === data.days ? "button primary" : "button"}
         aria-current={period === data.days ? "page" : undefined}>{period} {t.days}</Link>)}

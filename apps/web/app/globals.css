@@ -73,6 +73,7 @@ a { color: inherit; text-underline-offset: 4px; }
   transition: background-color 140ms ease, border-color 140ms ease;
 }
 .button.primary { background: var(--accent); color: var(--on-accent); }
+.report-period .button { transition: none; }
 .button.primary:hover { background: var(--accent-hover); }
 .button.primary:active { background: var(--accent-hover); border-color: var(--on-accent); }
 .button.secondary { border-color: var(--line); background: var(--panel); }
