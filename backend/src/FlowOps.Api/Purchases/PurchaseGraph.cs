@@ -2,7 +2,9 @@ using System.Text.Json;
 
 namespace FlowOps.Api;
 
-internal sealed record PurchaseGraph(int SchemaVersion, PurchaseNode?[]? Nodes, PurchaseEdge?[]? Edges)
+internal sealed record PurchaseGraph(int SchemaVersion, PurchaseNode?[]? Nodes, PurchaseEdge?[]? Edges,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    bool UseApprovalMatrix = false)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
@@ -15,9 +17,6 @@ internal sealed record PurchaseGraph(int SchemaVersion, PurchaseNode?[]? Nodes, 
     public static PurchaseGraph Read(string? json) => json is null ? Default : JsonSerializer.Deserialize<PurchaseGraph>(json, Json)!;
 
     public string Serialize() => JsonSerializer.Serialize(this, Json);
-
-    public bool RequiresFinance(decimal amount, decimal threshold) =>
-        Nodes!.Any(node => node!.Kind == "finance") && amount > threshold;
 
     public bool HasValidShape()
     {

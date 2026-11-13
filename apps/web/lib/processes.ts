@@ -1,3 +1,5 @@
+import type { StudioChoices, StudioSchema } from "./studio-forms";
+
 export type Step =
   | { kind: "timer"; seconds: number }
   | { kind: "http"; target: string }
@@ -18,6 +20,7 @@ export interface ProcessSpec {
   steps: Step[];
   attachment: "none" | "optional" | "required";
   layout?: Record<string, { x: number; y: number }> | null;
+  form?: { id: string; version: number; inputMap?: Record<string, string> | null } | null;
 }
 
 export interface ProcessMember { subject: string; email: string | null }
@@ -39,13 +42,17 @@ export interface ProcessDetail {
   canRun: boolean;
   draft: ProcessSpec | null;
   published: ProcessSpec | null;
+  form: StudioSchema | null;
+  formChoices: StudioChoices;
+  submissionDraft: { revision: number; answers: Record<string, string> } | null;
   targets: string[];
   members: ProcessMember[];
   attachmentLimit: number;
   page: number;
   hasMore: boolean;
-  tasks: { runId: string; stepId: string; title: string; assignee: string; completedAt: string | null; canComplete: boolean }[];
-  runs: { id: string; version: number; status: "running" | "completed" | "failed"; createdAt: string;
+  tasks: { runId: string; stepId: string; title: string; assignee: string; completedAt: string | null; dueAt: string | null;
+    escalatedAt: string | null; canComplete: boolean }[];
+  runs: { id: string; version: number; status: "running" | "completed" | "failed"; createdAt: string; dueAt: string | null; escalatedAt: string | null;
     answers: string; attachment: string | null }[];
 }
 
@@ -60,6 +67,7 @@ const en = {
   remove: "Remove", earlier: "Move up", later: "Move down", draft: "Draft", version: "Version",
   save: "Save draft", publish: "Publish version", saved: "Draft saved", published: "Version published",
   run: "Start process", runs: "Execution history", noRuns: "No executions yet.", noProcesses: "No processes available.",
+  deadline: "Deadline",
   running: "Running", completed: "Completed", failed: "Failed", started: "Process queued",
   invalidProcess: "Check the process name, fields, and step settings.",
   processChanged: "The process changed. Refresh the page and try again.",
@@ -87,6 +95,7 @@ const tr: typeof en = {
   remove: "Kaldır", earlier: "Yukarı taşı", later: "Aşağı taşı", draft: "Taslak", version: "Sürüm",
   save: "Taslağı kaydet", publish: "Sürümü yayınla", saved: "Taslak kaydedildi", published: "Sürüm yayınlandı",
   run: "Süreci başlat", runs: "Çalıştırma geçmişi", noRuns: "Henüz çalıştırma yok.", noProcesses: "Süreç bulunamadı.",
+  deadline: "Son tarih",
   running: "Çalışıyor", completed: "Tamamlandı", failed: "Başarısız", started: "Süreç kuyruğa alındı",
   invalidProcess: "Süreç adını, form alanlarını ve adım ayarlarını kontrol edin.",
   processChanged: "Süreç değişti. Sayfayı yenileyip tekrar deneyin.",

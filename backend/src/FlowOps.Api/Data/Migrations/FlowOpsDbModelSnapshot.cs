@@ -59,10 +59,25 @@ namespace FlowOps.Api.Data.Migrations
                     b.Property<DateTimeOffset?>("EscalatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("EscalationAction")
+                        .HasColumnType("text");
+
+                    b.Property<string>("EscalationFallback")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("WarnAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("WarnedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.HasKey("OrganizationId", "PurchaseId", "Stage");
 
                     b.HasIndex("DueAt")
                         .HasFilter("\"Decision\" IS NULL AND \"EscalatedAt\" IS NULL");
+
+                    b.HasIndex("WarnAt")
+                        .HasFilter("\"Decision\" IS NULL AND \"WarnedAt\" IS NULL AND \"WarnAt\" IS NOT NULL");
 
                     b.HasIndex("OrganizationId", "Assignee", "Decision");
 
@@ -102,6 +117,61 @@ namespace FlowOps.Api.Data.Migrations
                     b.HasIndex("OrganizationId", "PurchaseId", "Stage", "At");
 
                     b.ToTable("ApprovalAssignments", "flowops");
+                });
+
+            modelBuilder.Entity("FlowOps.Api.ApprovalDelegation", b =>
+                {
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Subject")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Delegate")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("EndsAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("StartsAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("OrganizationId", "Subject");
+
+                    b.HasIndex("OrganizationId", "Delegate");
+
+                    b.ToTable("ApprovalDelegations", "flowops");
+                });
+
+            modelBuilder.Entity("FlowOps.Api.ApprovalVote", b =>
+                {
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("PurchaseId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Stage")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Subject")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Comment")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("DecidedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Decision")
+                        .HasColumnType("text");
+
+                    b.HasKey("OrganizationId", "PurchaseId", "Stage", "Subject");
+
+                    b.HasIndex("OrganizationId", "Subject", "Decision");
+
+                    b.ToTable("ApprovalVotes", "flowops");
                 });
 
             modelBuilder.Entity("FlowOps.Api.AuditEvent", b =>
@@ -246,7 +316,16 @@ namespace FlowOps.Api.Data.Migrations
                     b.Property<Guid>("OrganizationId")
                         .HasColumnType("uuid");
 
-                    b.Property<Guid>("PurchaseId")
+                    b.Property<Guid?>("ProcessId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ProcessRunId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ProcessTitle")
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("PurchaseId")
                         .HasColumnType("uuid");
 
                     b.Property<DateTimeOffset?>("ReadAt")
@@ -257,6 +336,8 @@ namespace FlowOps.Api.Data.Migrations
                         .HasColumnType("text");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "ProcessRunId");
 
                     b.HasIndex("OrganizationId", "PurchaseId");
 
@@ -295,6 +376,18 @@ namespace FlowOps.Api.Data.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
+
+                    b.Property<string>("ApprovalMatrixJson")
+                        .HasColumnType("text");
+
+                    b.Property<int>("ApprovalMatrixRevision")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ApprovalSlaJson")
+                        .HasColumnType("text");
+
+                    b.Property<int>("ApprovalSlaRevision")
+                        .HasColumnType("integer");
 
                     b.Property<string>("Currency")
                         .IsRequired()
@@ -462,9 +555,15 @@ namespace FlowOps.Api.Data.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTimeOffset?>("DueAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("ElsaDefinitionId")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("EscalatedAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Fingerprint")
                         .IsRequired()
@@ -475,6 +574,9 @@ namespace FlowOps.Api.Data.Migrations
 
                     b.Property<Guid>("ProcessId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("SlaSnapshot")
+                        .HasColumnType("text");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -518,9 +620,21 @@ namespace FlowOps.Api.Data.Migrations
                     b.Property<DateTimeOffset?>("CompletedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTimeOffset?>("DueAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("EscalatedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("WarnAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("WarnedAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.HasKey("OrganizationId", "RunId", "StepId");
 
@@ -563,12 +677,21 @@ namespace FlowOps.Api.Data.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<int?>("MinimumApprovals")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("PreviousPurchaseId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Priority")
                         .IsRequired()
                         .HasColumnType("text");
 
                     b.Property<string>("Requester")
                         .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("ReviewersJson")
                         .HasColumnType("text");
 
                     b.Property<string>("Status")
@@ -579,6 +702,9 @@ namespace FlowOps.Api.Data.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<DateTimeOffset?>("WorkflowDueAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<Guid?>("WorkflowId")
                         .HasColumnType("uuid");
 
@@ -588,6 +714,9 @@ namespace FlowOps.Api.Data.Migrations
                     b.HasKey("OrganizationId", "Id");
 
                     b.HasIndex("OrganizationId", "CreatedAt");
+
+                    b.HasIndex("OrganizationId", "PreviousPurchaseId")
+                        .IsUnique();
 
                     b.HasIndex("OrganizationId", "Requester", "CreatedAt");
 
@@ -648,6 +777,9 @@ namespace FlowOps.Api.Data.Migrations
                     b.Property<int>("Number")
                         .HasColumnType("integer");
 
+                    b.Property<string>("ApprovalMatrixSnapshot")
+                        .HasColumnType("text");
+
                     b.Property<string>("ElsaDefinitionId")
                         .HasColumnType("text");
 
@@ -671,6 +803,87 @@ namespace FlowOps.Api.Data.Migrations
                     b.HasKey("OrganizationId", "WorkflowId", "Number");
 
                     b.ToTable("PurchaseWorkflowVersions", "flowops");
+                });
+
+            modelBuilder.Entity("FlowOps.Api.StudioFormDefinition", b =>
+                {
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Draft")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("PublishedRevision")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Revision")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer");
+
+                    b.HasKey("OrganizationId", "Id");
+
+                    b.HasIndex("OrganizationId", "Name");
+
+                    b.ToTable("StudioForms", "flowops");
+                });
+
+            modelBuilder.Entity("FlowOps.Api.StudioFormVersion", b =>
+                {
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("FormId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Number")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("PublishedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Schema")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("OrganizationId", "FormId", "Number");
+
+                    b.ToTable("StudioFormVersions", "flowops");
+                });
+
+            modelBuilder.Entity("FlowOps.Api.StudioSubmissionDraft", b =>
+                {
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ProcessId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Subject")
+                        .HasColumnType("text");
+
+                    b.Property<int>("ProcessVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Answers")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Revision")
+                        .HasColumnType("integer");
+
+                    b.HasKey("OrganizationId", "ProcessId", "Subject", "ProcessVersion");
+
+                    b.ToTable("StudioSubmissionDrafts", "flowops");
                 });
 
             modelBuilder.Entity("FlowOps.Api.WorkflowCommand", b =>
@@ -707,6 +920,69 @@ namespace FlowOps.Api.Data.Migrations
                     b.ToTable("WorkflowCommands", "flowops");
                 });
 
+            modelBuilder.Entity("FlowOps.Api.WorkflowSimulationRun", b =>
+                {
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("WorkflowId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Actor")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ScenarioId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Snapshot")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("OrganizationId", "WorkflowId", "Id");
+
+                    b.HasIndex("OrganizationId", "WorkflowId", "CreatedAt");
+
+                    b.HasIndex("OrganizationId", "WorkflowId", "ScenarioId");
+
+                    b.ToTable("WorkflowSimulationRuns", "flowops");
+                });
+
+            modelBuilder.Entity("FlowOps.Api.WorkflowSimulationScenario", b =>
+                {
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("WorkflowId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Input")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("OrganizationId", "WorkflowId", "Id");
+
+                    b.HasIndex("OrganizationId", "WorkflowId", "CreatedAt");
+
+                    b.ToTable("WorkflowSimulationScenarios", "flowops");
+                });
+
             modelBuilder.Entity("FlowOps.Api.Approval", b =>
                 {
                     b.HasOne("FlowOps.Api.Purchase", null)
@@ -717,6 +993,30 @@ namespace FlowOps.Api.Data.Migrations
                 });
 
             modelBuilder.Entity("FlowOps.Api.ApprovalAssignment", b =>
+                {
+                    b.HasOne("FlowOps.Api.Approval", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "PurchaseId", "Stage")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("FlowOps.Api.ApprovalDelegation", b =>
+                {
+                    b.HasOne("FlowOps.Api.Membership", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "Delegate")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("FlowOps.Api.Membership", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "Subject")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("FlowOps.Api.ApprovalVote", b =>
                 {
                     b.HasOne("FlowOps.Api.Approval", null)
                         .WithMany()
@@ -764,11 +1064,13 @@ namespace FlowOps.Api.Data.Migrations
 
             modelBuilder.Entity("FlowOps.Api.Notification", b =>
                 {
+                    b.HasOne("FlowOps.Api.ProcessRun", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "ProcessRunId");
+
                     b.HasOne("FlowOps.Api.Purchase", null)
                         .WithMany()
-                        .HasForeignKey("OrganizationId", "PurchaseId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                        .HasForeignKey("OrganizationId", "PurchaseId");
                 });
 
             modelBuilder.Entity("FlowOps.Api.NotificationDelivery", b =>
@@ -842,6 +1144,11 @@ namespace FlowOps.Api.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("FlowOps.Api.Purchase", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "PreviousPurchaseId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("FlowOps.Api.PurchaseWorkflowVersion", null)
                         .WithMany()
                         .HasForeignKey("OrganizationId", "WorkflowId", "WorkflowVersion")
@@ -866,11 +1173,61 @@ namespace FlowOps.Api.Data.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("FlowOps.Api.StudioFormDefinition", b =>
+                {
+                    b.HasOne("FlowOps.Api.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("FlowOps.Api.StudioFormVersion", b =>
+                {
+                    b.HasOne("FlowOps.Api.StudioFormDefinition", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "FormId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("FlowOps.Api.StudioSubmissionDraft", b =>
+                {
+                    b.HasOne("FlowOps.Api.ProcessDefinition", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "ProcessId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("FlowOps.Api.WorkflowCommand", b =>
                 {
                     b.HasOne("FlowOps.Api.Purchase", null)
                         .WithMany()
                         .HasForeignKey("OrganizationId", "PurchaseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("FlowOps.Api.WorkflowSimulationRun", b =>
+                {
+                    b.HasOne("FlowOps.Api.PurchaseWorkflowDefinition", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "WorkflowId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("FlowOps.Api.WorkflowSimulationScenario", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "WorkflowId", "ScenarioId")
+                        .OnDelete(DeleteBehavior.NoAction);
+                });
+
+            modelBuilder.Entity("FlowOps.Api.WorkflowSimulationScenario", b =>
+                {
+                    b.HasOne("FlowOps.Api.PurchaseWorkflowDefinition", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "WorkflowId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

@@ -10,24 +10,28 @@ export interface PurchaseExecutionData {
   nodes: { id: string; status: string; completedAt: string | null }[];
 }
 
-export function PurchaseExecution({ execution, terminal, locale }: {
+export function PurchaseExecution({ execution, terminal, locale, activeNode, visitedEdges, failedNode }: {
   execution: PurchaseExecutionData; terminal: boolean; locale: Locale;
+  activeNode?: string; visitedEdges?: ReadonlySet<string>; failedNode?: string;
 }) {
   const t = graphText[locale];
   const records = new Map(execution.nodes.map(node => [node.id, node]));
   const nodes = execution.graph.nodes.map(node => {
     const record = records.get(node.id);
-    const status = record?.status === "Faulted" ? "faulted" : record?.completedAt ? "completed" :
+    const status = node.id === failedNode || record?.status === "Faulted" ? "faulted" : node.id === activeNode ? "active" : record?.completedAt ? "completed" :
       record ? "active" : terminal ? "skipped" : "queued";
     return { id: node.id, position: { x: node.x, y: node.y },
       sourcePosition: Position.Right, targetPosition: Position.Left,
       className: `execution-node execution-node-${status}`, ariaLabel: `${t[node.kind]}: ${t[status]}`,
       data: { label: <><span>{t[node.kind]}</span><strong>{t[status]}</strong></> } };
   });
-  const edges = execution.graph.edges.map(edge => ({
-    id: [edge.source, edge.target, edge.branch].join(":"), source: edge.source, target: edge.target,
-    label: edge.branch ? t[edge.branch] : undefined, markerEnd: { type: MarkerType.ArrowClosed },
-  }));
+  const edges = execution.graph.edges.map(edge => {
+    const id = [edge.source, edge.target, edge.branch].join(":");
+    return { id, source: edge.source, target: edge.target,
+      className: visitedEdges?.has(id) ? "simulation-visited" : undefined,
+      label: edge.branch ? t[edge.branch] : undefined, markerEnd: { type: MarkerType.ArrowClosed },
+    };
+  });
   return <section className="panel detail-panel settings-panel" aria-label={t.execution}>
     <h2>{t.execution}</h2>
     <div className="purchase-canvas">

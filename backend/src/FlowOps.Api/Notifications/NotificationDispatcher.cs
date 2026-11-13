@@ -69,7 +69,7 @@ internal sealed class NotificationDispatcher(
         var member = await db.Memberships.AsNoTracking().SingleOrDefaultAsync(x =>
             x.OrganizationId == notification.OrganizationId && x.Subject == notification.Recipient, token);
         var payload = new NotificationEvent(notification.Id, notification.OrganizationId, notification.PurchaseId,
-            notification.Kind, notification.CreatedAt);
+            notification.Kind, notification.CreatedAt, notification.ProcessId, notification.ProcessRunId);
         try
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
@@ -106,9 +106,10 @@ internal sealed class NotificationDispatcher(
                 using (var client = SmtpDelivery.CreateClient(smtp))
                 using (var mail = new MailMessage(smtp["From"]!, member.Email))
                 {
-                    mail.Subject = "FlowOps purchase update";
+                    mail.Subject = payload.ProcessId is null ? "FlowOps purchase update" : "FlowOps process deadline";
                     var origin = config["Auth:WebOrigin"] ?? "http://localhost:3000";
-                    mail.Body = $"Open FlowOps to review this update.\n{origin.TrimEnd('/')}/workspace/{payload.OrganizationId}/purchases/{payload.PurchaseId}";
+                    var path = payload.ProcessId is Guid process ? $"processes/{process}?runId={payload.ProcessRunId}" : $"purchases/{payload.PurchaseId}";
+                    mail.Body = $"Open FlowOps to review this update.\n{origin.TrimEnd('/')}/workspace/{payload.OrganizationId}/{path}";
                     await client.SendMailAsync(mail, token);
                 }
                 break;
@@ -149,5 +150,6 @@ internal sealed class NotificationDispatcher(
         }, JsonSerializer.SerializeToUtf8Bytes(payload, JsonSerializerOptions.Web), token);
     }
 
-    private sealed record NotificationEvent(Guid Id, Guid OrganizationId, Guid PurchaseId, string Kind, DateTimeOffset CreatedAt);
+    private sealed record NotificationEvent(Guid Id, Guid OrganizationId, Guid? PurchaseId, string Kind, DateTimeOffset CreatedAt,
+        Guid? ProcessId, Guid? ProcessRunId);
 }

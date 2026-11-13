@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Elsa.Extensions;
 using Elsa.Workflows;
 using Elsa.Workflows.Activities;
@@ -166,7 +167,8 @@ internal sealed class ProcessWorker(IServiceScopeFactory scopes, ILogger<Process
                 await client.CreateAndRunInstanceAsync(new()
                 {
                     WorkflowDefinitionHandle = WorkflowDefinitionHandle.ByDefinitionVersionId(run.ElsaDefinitionId),
-                    CorrelationId = instance
+                    CorrelationId = instance,
+                    Input = StudioInputs(run.Answers)
                 }, token);
 
             var state = await client.ExportStateAsync(token);
@@ -197,8 +199,10 @@ internal sealed class ProcessWorker(IServiceScopeFactory scopes, ILogger<Process
                         run.Status = "failed";
                         break;
                     }
+                    var (dueAt, warnAt) = ApprovalSla.ProcessTaskSchedule(run.SlaSnapshot, now, run.DueAt);
                     var task = new ProcessTask { OrganizationId = run.OrganizationId, RunId = run.Id, StepId = step,
-                        Assignee = assignee, Title = bookmark.Metadata["flowopsTaskTitle"] };
+                        Assignee = assignee, Title = bookmark.Metadata["flowopsTaskTitle"],
+                        DueAt = dueAt, WarnAt = warnAt };
                     tasks.Add(step, task);
                     db.ProcessTasks.Add(task);
                 }
@@ -215,6 +219,15 @@ internal sealed class ProcessWorker(IServiceScopeFactory scopes, ILogger<Process
         await db.SaveChangesAsync(token);
         await transaction.CommitAsync(token);
         return true;
+    }
+
+    internal static Dictionary<string, object> StudioInputs(string answers)
+    {
+        using var document = JsonDocument.Parse(answers);
+        return document.RootElement.EnumerateArray()
+            .Where(answer => answer.TryGetProperty("key", out _))
+            .ToDictionary(answer => (answer.TryGetProperty("inputName", out var mapped) ? mapped : answer.GetProperty("key")).GetString()!,
+                answer => (object)answer.GetProperty("value").GetString()!, StringComparer.Ordinal);
     }
 
     private static string? TaskId(IDictionary<string, string>? metadata) =>

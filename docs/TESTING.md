@@ -18,9 +18,11 @@ See TASKS.md for executed checks and outstanding test coverage.
 
 The general process browser tests cover publication, parallel timers, webhook replay, form submission, attachment isolation, and editor/operator permissions. To run the local HTTP receiver test, set `Processes__Targets__receipt=http://127.0.0.1:5084/receipt` for the API and `FLOWOPS_TEST_PROCESS_HTTP=1` for Playwright. With SeaweedFS running, set `FLOWOPS_TEST_PROCESS_STORAGE=1` to exercise a 10 MiB attachment together with the assigned-task and permission scenarios.
 
+`simulation.spec.ts` verifies graph validation, version pinning, trace review, scenario reload, export, comparison and authorization against the local API. `studio-forms.spec.ts` verifies form editing, conditional server validation, draft conflicts, version pinning and a real Elsa run. Both exercise the four target widths and light/dark accessibility checks. The purchase suite verifies that delegation preserves the deadline and moves decision access to the new assignee.
+
 From `backend`, run `dotnet run --project tests/FlowOps.Api.Tests -c Release` with Docker running. The xUnit suite applies the real FlowOps migrations to disposable PostgreSQL containers, checks concurrent workflow quota enforcement and tenant isolation, and verifies that the notification and its delivery rows are persisted together. It also checks production authentication settings and key-ring reuse.
 
-With Docker dependencies running and the API and web ports free, run `./infrastructure/ci-browser.ps1` to exercise the restart scenario used in CI. Playwright requests a restart after confirming that the purchase is waiting for finance. The runner stops the API process, starts a new one against the same database, and waits for readiness before Playwright verifies and completes the pending approval.
+With Docker dependencies running and the API and web ports free, run `./infrastructure/ci-browser.ps1` to exercise both restart scenarios used in CI. Playwright requests one restart while a process task is waiting for its deadline and another while a purchase is waiting for finance. The runner starts a new API against the same database and waits for readiness. The process test verifies fallback assignment, one in-app notification, the old assignee losing completion access, and the new assignee completing the Elsa run. Pass `-ProcessSlaOnly` to run that scenario by itself.
 
 To include the invitation email assertion, start the integrations profile and set the following environment variables before starting the API and browser runner.
 

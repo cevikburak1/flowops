@@ -48,3 +48,17 @@
 - [x] Redesign the workspace dashboard and navigation. Add 6-, 12-, and 48-month purchase activity and paginate requests, approvals, notifications, tasks, workflow and process catalogs, histories, settings lists, and report audit events.
 - [x] Populate the local demo workspace with 1,126 purchases, 646 process runs, 2,846 notifications, and 11 definitions in each catalog. Historical completions are synthetic archive records. Pending work uses the live Elsa workflow.
 - [x] Verify the populated workspace at 1440, 1024, 768, and 390px in both themes. Check keyboard navigation, chart selection, pagination, Turkish labels, form validation, and axe. Next.js and API builds passed. The existing Playwright suite passed six tests and skipped the optional HTTP target test.
+- [x] Studio 2.0 repository audit and technical design. See [ROADMAP_V2.md](ROADMAP_V2.md) for remaining module scope.
+- [x] Verify purchase simulation against saved drafts and immutable versions, with isolated traces, saved scenarios, comparison, JSON export, and tenant authorization.
+- [x] Verify the first reusable form slice with draft autosave, conditional server validation, version binding, private answer drafts, and an Elsa process started by a real submission.
+- [x] Verify task-specific approval delegation preserves the deadline and transfers decision access.
+- [x] Run Studio regression verification. Nine Playwright scenarios passed with a local HTTP receiver, and 11 xUnit tests passed including PostgreSQL migrations. Frontend lint, type checks, production build and backend Release build passed. Studio screens passed axe checks in both themes and fit 1440, 1024, 768 and 390px.
+- [x] Implement business-calendar SLA policies, warnings and escalation actions, and verify timed process recovery across an API restart.
+- [x] Verify multi-step Studio forms, restricted attachments, and Elsa input name mapping in Playwright.
+- [x] Verify the first approval matrix and SLA slices in Playwright. The scenario covers preview, stale revisions, organization authorization, real routing, and the configured deadline. Ten targeted xUnit tests passed, including both daylight-saving transitions.
+- [x] Verify directory selectors, SLA reminder recovery, parallel quorum, request changes, and configurable escalation actions.
+- [x] Verify parallel purchase quorum, concurrent votes and replay, request-changes outcomes, and SLA compliance reporting. PostgreSQL suite passed 17 tests. Eight browser scenarios passed in the full run; the directory label assertion was corrected to match stable subjects and that scenario passed on rerun.
+- [x] Verify workflow publication snapshots, linked purchase revisions and requester cancellation in Playwright. Verify tenant-scoped department choices and fallback reassignment. The 17-test PostgreSQL suite and frontend build passed.
+- [x] Verify scheduled single-reviewer delegation and general-process deadlines. All nine browser scenarios passed, followed by separate checks for process deadlines and a real API restart during a pending finance approval.
+- [x] Verify parallel participant transfers, including tenant isolation and preserved quorum/deadline. Verify process SLA fallback after an API restart, the in-app notification link, and completion by the new assignee.
+- [x] Close Workflow Studio 2.0 Phase 1 for the scope in ROADMAP_V2.md. All 10 Playwright scenarios and 19 backend tests passed. Frontend lint, type checks and production build passed. Both local services returned HTTP 200 after a clean restart.

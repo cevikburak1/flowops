@@ -40,7 +40,8 @@ function NotificationList({ items, base, api, locale }: {
     {items.map(item => <li key={item.id} data-unread={!item.readAt || undefined}>
       <span className="activity-icon" aria-hidden>{item.kind.startsWith("approval") ? <ClipboardCheck size={17} /> : <Bell size={17} />}</span>
       <div className="notification-copy">
-        <Link href={`${base}/purchases/${item.purchaseId}`}>{item.title}</Link>
+        <Link href={item.processId && item.processRunId ? `${base}/processes/${item.processId}?runId=${item.processRunId}` :
+          `${base}/purchases/${item.purchaseId}`}>{item.title}</Link>
         <span className="row-meta">{label(locale, item.kind)}</span>
         <time className="row-meta" dateTime={item.createdAt}>{date.format(new Date(item.createdAt))}</time>
       </div>

@@ -71,16 +71,18 @@ function GroupForm({ group, managers, base, locale }: {
   </SettingsForm>;
 }
 
-export function ReassignApproval({ locale, path, current, members }: {
-  locale: Locale; path: string; current: string; members: Pick<Member, "subject" | "email">[];
+export function ReassignApproval({ locale, path, current, members, returnToTasks }: {
+  locale: Locale; path: string; current: string; members: Pick<Member, "subject" | "email">[]; returnToTasks?: string;
 }) {
   const router = useRouter();
   const t = organizationText[locale];
-  return <SettingsForm locale={locale} submit={t.assign} action={async fields => {
+  const action = returnToTasks ? t.delegate : t.assign;
+  return <SettingsForm locale={locale} submit={action} action={async fields => {
     await post(path, { assignee: fields.get("assignee"), expectedAssignee: current });
-    router.refresh();
+    if (returnToTasks) router.push(returnToTasks);
+    else router.refresh();
   }}>
-    <label>{t.assign}<select name="assignee" required defaultValue="">
+    <label>{action}<select name="assignee" required defaultValue="">
       <option value="" disabled>{t.noManager}</option>
       {members.map(member => <option key={member.subject} value={member.subject}>{member.email ?? member.subject}</option>)}
     </select></label>

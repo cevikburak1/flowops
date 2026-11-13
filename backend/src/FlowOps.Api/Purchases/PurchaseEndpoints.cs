@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Elsa.Workflows.Runtime;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using System.Text.Json;
 
 namespace FlowOps.Api;
 
@@ -31,12 +32,18 @@ internal static class PurchaseEndpoints
         OrganizationEndpoints.Map(api, tenant);
         ReportingEndpoints.Map(api, tenant);
         WorkflowCatalog.Map(tenant);
+        WorkflowSimulationEndpoints.Map(tenant);
         ProcessEndpoints.Map(tenant);
+        StudioFormEndpoints.Map(tenant);
         ApprovalAssignments.Map(tenant);
+        ApprovalDelegations.Map(tenant);
+        ApprovalMatrix.Map(tenant);
+        ApprovalSla.Map(tenant);
         tenant.MapGet("/workspace", GetWorkspaceAsync);
         tenant.MapGet("/tasks", GetTasksAsync);
         tenant.MapPost("/purchases", SubmitAsync);
         tenant.MapGet("/purchases/{purchaseId:guid}", GetPurchaseAsync);
+        tenant.MapPost("/purchases/{purchaseId:guid}/cancel", CancelAsync);
         tenant.MapPost("/purchases/{purchaseId:guid}/approvals/{stage:int}", DecideAsync);
         tenant.MapPost("/notifications/{notificationId:guid}/read", MarkReadAsync);
     }
@@ -85,7 +92,7 @@ internal static class PurchaseEndpoints
         var pageNumber = Math.Clamp(page ?? 1, 1, 10000);
         var currentNotifications = Math.Clamp(notificationPage ?? 1, 1, 10000);
         var owned = db.Purchases.AsNoTracking().Where(x => x.OrganizationId == organizationId && x.Requester == subject);
-        var pending = db.Approvals.AsNoTracking().Where(x => x.OrganizationId == organizationId && x.Assignee == subject && x.Decision == null);
+        var pending = PersonalApprovals(db, organizationId, subject).Where(x => x.Decision == null);
         var pendingCount = await pending.CountAsync(token);
         var statuses = await owned.GroupBy(x => x.Status).Select(x => new { Status = x.Key, Count = x.Count() }).ToListAsync(token);
         var purchases = await owned.OrderByDescending(x => x.CreatedAt).ThenBy(x => x.Id).Skip((pageNumber - 1) * pageSize).Take(pageSize)
@@ -96,10 +103,12 @@ internal static class PurchaseEndpoints
             select new { purchase.Id, purchase.Title, purchase.Category, purchase.Amount, purchase.Currency, purchase.Status, purchase.CreatedAt, approval.Stage })
             .Skip((pageNumber - 1) * pageSize).Take(pageSize).ToListAsync(token);
         var notifications = await (from notification in db.Notifications.AsNoTracking()
-            join purchase in db.Purchases on new { notification.OrganizationId, Id = notification.PurchaseId } equals new { purchase.OrganizationId, purchase.Id }
+            join purchase in db.Purchases on new { notification.OrganizationId, Id = notification.PurchaseId } equals new { purchase.OrganizationId, Id = (Guid?)purchase.Id } into purchasesForNotice
+            from purchase in purchasesForNotice.DefaultIfEmpty()
             where notification.OrganizationId == organizationId && notification.Recipient == subject
             orderby notification.CreatedAt descending, notification.Id
-            select new { notification.Id, notification.PurchaseId, purchase.Title, notification.Kind, notification.CreatedAt, notification.ReadAt })
+            select new { notification.Id, notification.PurchaseId, Title = purchase == null ? notification.ProcessTitle : purchase.Title,
+                notification.ProcessId, notification.ProcessRunId, notification.Kind, notification.CreatedAt, notification.ReadAt })
             .Skip((currentNotifications - 1) * pageSize).Take(pageSize + 1).ToListAsync(token);
         var now = DateTimeOffset.UtcNow;
         var monthStart = new DateTimeOffset(now.Year, now.Month, 1, 0, 0, 0, TimeSpan.Zero);
@@ -127,7 +136,7 @@ internal static class PurchaseEndpoints
             return Results.BadRequest(new { code = "invalidFilter" });
 
         var now = DateTimeOffset.UtcNow;
-        var approvals = db.Approvals.AsNoTracking().Where(x => x.OrganizationId == organizationId && x.Assignee == subject);
+        var approvals = PersonalApprovals(db, organizationId, subject);
         approvals = status switch
         {
             "completed" => approvals.Where(x => x.Decision != null),
@@ -151,6 +160,15 @@ internal static class PurchaseEndpoints
         return Results.Ok(new { Items = items.Take(pageSize), Page = current, HasMore = items.Count > pageSize });
     }
 
+    private static IQueryable<Approval> PersonalApprovals(FlowOpsDb db, Guid org, string subject)
+    {
+        var votes = db.ApprovalVotes.Where(vote => vote.OrganizationId == org);
+        return db.Approvals.AsNoTracking().Where(approval => approval.OrganizationId == org &&
+            (approval.Assignee == subject && !votes.Any(vote => vote.PurchaseId == approval.PurchaseId && vote.Stage == approval.Stage) ||
+             votes.Any(vote => vote.PurchaseId == approval.PurchaseId && vote.Stage == approval.Stage &&
+                vote.Subject == subject && (approval.Decision != null || vote.Decision == null))));
+    }
+
     private static async Task<IResult> SubmitAsync(Guid organizationId, PurchaseInput input, ClaimsPrincipal user, FlowOpsDb db, CancellationToken token)
     {
         var subject = Subject(user);
@@ -172,6 +190,18 @@ internal static class PurchaseEndpoints
         var existing = await db.Purchases.AsNoTracking().SingleOrDefaultAsync(x => x.OrganizationId == organizationId && x.Id == input.Id, token);
         if (existing is not null) return Replay(existing, input, subject, title, description);
 
+        if (input.PreviousPurchaseId is Guid previous)
+        {
+            var original = await db.Purchases.AsNoTracking().SingleOrDefaultAsync(row =>
+                row.OrganizationId == organizationId && row.Id == previous && row.Requester == subject, token);
+            if (original is null) return Results.NotFound();
+            if (original.Status != "changesRequested" || await db.Purchases.AnyAsync(row =>
+                row.OrganizationId == organizationId && row.PreviousPurchaseId == previous, token))
+                return Results.Conflict(new { code = "revisionUnavailable" });
+            if (original.WorkflowId != input.WorkflowId)
+                return Invalid("workflowId", "Use the original workflow when submitting a revision.");
+        }
+
         PurchaseWorkflowVersion? version = null;
         if (input.WorkflowId is Guid workflowId)
         {
@@ -186,20 +216,34 @@ internal static class PurchaseEndpoints
             x.OrganizationId == organizationId && x.Subject == manager && ManagerRoles.Contains(x.Role), token))
             return Results.Conflict(new { code = "managerMissing" });
         string? finance = null;
-        var needsFinance = version is null
-            ? input.Amount > org.FinanceThreshold
-            : PurchaseGraph.Read(version.GraphJson).RequiresFinance(input.Amount, version.FinanceThreshold);
+        var graph = version is null ? null : PurchaseGraph.Read(version.GraphJson);
+        var matrix = version is null ? org.ApprovalMatrixJson : version.ApprovalMatrixSnapshot;
+        var rule = ApprovalMatrix.Match(ApprovalMatrix.Read(matrix), org.Currency, input.Amount,
+            input.Category, member.Role, member.DepartmentId);
+        var reviewers = rule?.AdditionalReviewers ?? [];
+        if (reviewers.Contains(subject) || reviewers.Contains(manager) || reviewers.Length != await db.Memberships.CountAsync(row =>
+            row.OrganizationId == organizationId && reviewers.Contains(row.Subject) && ManagerRoles.Contains(row.Role), token))
+            return Results.Conflict(new { code = "reviewersUnavailable" });
+        var needsFinance = (graph is null || graph.Nodes!.Any(node => node?.Kind == "finance")) && (rule?.Route switch
+        {
+            "manager" => false,
+            "managerFinance" => true,
+            _ => input.Amount > (version?.FinanceThreshold ?? org.FinanceThreshold)
+        });
         if (needsFinance)
         {
             finance = await db.Memberships.Where(x => x.OrganizationId == organizationId && x.Role == "Approver" &&
-                    x.Subject != subject && x.Subject != manager && (org.FinanceApprover == null || x.Subject == org.FinanceApprover))
+                    x.Subject != subject && x.Subject != manager && !reviewers.Contains(x.Subject) &&
+                    (org.FinanceApprover == null || x.Subject == org.FinanceApprover))
                 .OrderBy(x => x.Subject).Select(x => x.Subject).FirstOrDefaultAsync(token);
             if (finance is null) return Results.Conflict(new { code = "financeMissing" });
         }
 
         var purchase = new Purchase { OrganizationId = organizationId, Id = input.Id, Requester = subject, Title = title,
             Description = description, Category = input.Category, Amount = input.Amount, Currency = org.Currency, Manager = manager,
-            Finance = finance, WorkflowId = version?.WorkflowId, WorkflowVersion = version?.Number, Priority = input.Priority ?? "normal" };
+            Finance = finance, WorkflowId = version?.WorkflowId, WorkflowVersion = version?.Number, Priority = input.Priority ?? "normal",
+            ReviewersJson = reviewers.Length == 0 ? null : JsonSerializer.Serialize(reviewers), MinimumApprovals = rule?.MinimumApprovals,
+            PreviousPurchaseId = input.PreviousPurchaseId, WorkflowDueAt = ApprovalSla.WorkflowDeadline(org.ApprovalSlaJson, DateTimeOffset.UtcNow) };
         db.Purchases.Add(purchase);
         db.WorkflowCommands.Add(new WorkflowCommand { OrganizationId = organizationId, PurchaseId = purchase.Id, Stage = 0 });
         Record(db, purchase, subject, "submitted");
@@ -221,7 +265,7 @@ internal static class PurchaseEndpoints
         existing.Requester == subject && existing.Title == title && existing.Description == description &&
         existing.Category == input.Category && existing.Amount == input.Amount && existing.Currency == input.Currency &&
         existing.WorkflowId == input.WorkflowId && existing.WorkflowVersion == input.WorkflowVersion &&
-        existing.Priority == (input.Priority ?? "normal")
+        existing.Priority == (input.Priority ?? "normal") && existing.PreviousPurchaseId == input.PreviousPurchaseId
             ? Results.Ok(new { existing.Id })
             : Results.Conflict(new { code = "requestConflict" });
 
@@ -235,7 +279,10 @@ internal static class PurchaseEndpoints
         if (purchase is null) return Results.NotFound();
         var approvals = db.Approvals.AsNoTracking().Where(x => x.OrganizationId == organizationId && x.PurchaseId == purchaseId);
         var canManage = OrganizationEndpoints.CanManage(member.Role);
-        if (!canManage && purchase.Requester != subject && !await approvals.AnyAsync(x => x.Assignee == subject, token))
+        var votes = await db.ApprovalVotes.AsNoTracking().Where(x => x.OrganizationId == organizationId && x.PurchaseId == purchaseId)
+            .OrderBy(x => x.Subject).ToListAsync(token);
+        if (!canManage && purchase.Requester != subject && !votes.Any(vote => vote.Subject == subject) &&
+            !await approvals.AnyAsync(x => x.Assignee == subject, token))
             return Results.NotFound();
         var workflow = await db.PurchaseWorkflowVersions.AsNoTracking().Where(x => x.OrganizationId == organizationId &&
             x.WorkflowId == purchase.WorkflowId && x.Number == purchase.WorkflowVersion)
@@ -254,22 +301,60 @@ internal static class PurchaseEndpoints
         };
         var timeline = await db.Audit.AsNoTracking().Where(x => x.OrganizationId == organizationId && x.PurchaseId == purchaseId)
             .OrderBy(x => x.At).Select(x => new { x.Action, x.At }).ToListAsync(token);
-        var stages = await approvals.OrderBy(x => x.Stage).Select(x => new { x.Stage, x.Assignee, x.Decision, x.Comment, x.DecidedAt, x.DueAt,
-            CanDecide = x.Assignee == subject && x.Decision == null }).ToListAsync(token);
+        var rows = await approvals.OrderBy(x => x.Stage).ToListAsync(token);
+        var stages = rows.Select(x => new { x.Stage, x.Assignee, x.Decision, x.Comment, x.DecidedAt, x.DueAt,
+            Parallel = x.Stage == 1 && votes.Count > 0,
+            CanDecide = x.Decision == null && (x.Stage == 1 && votes.Count > 0
+                ? votes.Any(vote => vote.Subject == subject && vote.Decision is null)
+                : x.Assignee == subject) }).ToArray();
         var assignmentHistory = await db.ApprovalAssignments.AsNoTracking()
             .Where(x => x.OrganizationId == organizationId && x.PurchaseId == purchaseId).OrderBy(x => x.At).ThenBy(x => x.Id)
             .Select(x => new { x.Stage, x.Assignee, x.Actor, x.At }).ToListAsync(token);
         var managerRoles = ManagerRoles;
-        var eligibleMembers = canManage ? await db.Memberships.AsNoTracking().Where(x => x.OrganizationId == organizationId &&
-            x.Subject != purchase.Requester && (managerRoles.Contains(x.Role) || x.Role == "Approver"))
+        var activeStages = stages.Where(x => x.CanDecide).Select(x => x.Stage).ToArray();
+        var candidates = canManage || activeStages.Length > 0 ? await db.Memberships.AsNoTracking().Where(x =>
+            x.OrganizationId == organizationId && x.Subject != purchase.Requester &&
+            ((canManage || activeStages.Contains(1)) && managerRoles.Contains(x.Role) ||
+             (canManage || activeStages.Contains(2)) && x.Role == "Approver"))
             .OrderBy(x => x.Email).ThenBy(x => x.Subject).Select(x => new { x.Subject, x.Email, x.Role }).ToListAsync(token) : null;
-        return Results.Ok(new { purchase.Id, purchase.Title, purchase.Description, purchase.Category,
-            purchase.Amount, purchase.Currency, purchase.Status, purchase.CreatedAt, purchase.Priority,
+        var revised = purchase.Status == "changesRequested" ? await db.Purchases.Where(row =>
+            row.OrganizationId == organizationId && row.PreviousPurchaseId == purchaseId).Select(row => (Guid?)row.Id).SingleOrDefaultAsync(token) : null;
+        return Results.Ok(new { purchase.Id, purchase.Title, purchase.Description, purchase.Category, purchase.PreviousPurchaseId,
+            RevisedPurchaseId = revised, CanResubmit = purchase.Requester == subject && purchase.Status == "changesRequested" && revised is null,
+            purchase.WorkflowId, CanCancel = purchase.Requester == subject && stages.Any(stage => stage.Decision is null),
+            purchase.Amount, purchase.Currency, purchase.Status, purchase.CreatedAt, purchase.Priority, purchase.WorkflowDueAt,
             Workflow = workflow is null ? null : new { workflow.Name, workflow.Number }, Execution = execution,
-            Timeline = timeline, Stages = stages, AssignmentHistory = assignmentHistory, EligibleMembers = eligibleMembers,
+            Timeline = timeline, Stages = stages, AssignmentHistory = assignmentHistory,
+            EligibleMembers = canManage ? candidates : null, DelegationMembers = candidates,
+            MinimumApprovals = purchase.MinimumApprovals, Votes = votes.Select(vote => new
+            { vote.Subject, vote.Decision, vote.DecidedAt, Mine = vote.Subject == subject }),
             Processing = purchase.Status == "starting" ||
                 (purchase.Status == "managerReview" && stages.Any(x => x.Stage == 1 && x.Decision != null)) ||
                 (purchase.Status == "financeReview" && stages.Any(x => x.Stage == 2 && x.Decision != null)) });
+    }
+
+    private static async Task<IResult> CancelAsync(Guid organizationId, Guid purchaseId, ClaimsPrincipal user,
+        FlowOpsDb db, CancellationToken token)
+    {
+        await using var transaction = await db.Database.BeginTransactionAsync(token);
+        if (await OrganizationEndpoints.LockAsync(db, organizationId, token) is null) return Results.NotFound();
+        var subject = Subject(user);
+        if (await MembershipAsync(db, organizationId, subject, token) is null) return Results.NotFound();
+        var purchase = await db.Purchases.FindAsync([organizationId, purchaseId], token);
+        if (purchase is null || purchase.Requester != subject) return Results.NotFound();
+        if (purchase.Status == "canceled") return Results.Accepted();
+        if (purchase.Status is not ("managerReview" or "financeReview")) return Results.Conflict();
+        var now = DateTimeOffset.UtcNow;
+        var closed = await db.Approvals.Where(row => row.OrganizationId == organizationId && row.PurchaseId == purchaseId &&
+            row.Decision == null).ExecuteUpdateAsync(set => set.SetProperty(row => row.Decision, "canceled")
+                .SetProperty(row => row.DecidedAt, now), token);
+        if (closed != 1) return Results.Conflict();
+        purchase.Status = "canceled";
+        Record(db, purchase, subject, "canceled");
+        db.WorkflowCommands.Add(new() { OrganizationId = organizationId, PurchaseId = purchaseId, Stage = -1 });
+        await db.SaveChangesAsync(token);
+        await transaction.CommitAsync(token);
+        return Results.Accepted();
     }
 
     private static async Task<IResult> DecideAsync(Guid organizationId, Guid purchaseId, int stage, DecisionInput input,
@@ -278,10 +363,13 @@ internal static class PurchaseEndpoints
         var subject = Subject(user);
         var member = await MembershipAsync(db, organizationId, subject, token);
         if (member is null) return Results.NotFound();
-        if (input.Decision is not ("approved" or "rejected")) return Invalid("decision", "Select approve or reject.");
+        if (input.Decision is not ("approved" or "rejected" or "changesRequested")) return Invalid("decision", "Select a decision.");
         var comment = input.Comment?.Trim();
-        if (comment?.Length > 1000) return Invalid("comment", "Use at most 1,000 characters.");
+        if (comment?.Length > 1000 || input.Decision == "changesRequested" && string.IsNullOrEmpty(comment))
+            return Invalid("comment", "Enter a reason for requested changes, up to 1,000 characters.");
         var purchase = await db.Purchases.SingleOrDefaultAsync(x => x.OrganizationId == organizationId && x.Id == purchaseId, token);
+        if (purchase?.ReviewersJson is not null && stage == 1)
+            return await DecideParallelAsync(db, purchase, subject, input.Decision, comment, token);
         var approval = await db.Approvals.SingleOrDefaultAsync(x => x.OrganizationId == organizationId && x.PurchaseId == purchaseId && x.Stage == stage, token);
         if (purchase is null || approval is null || approval.Assignee != subject) return Results.NotFound();
         if (purchase.Requester == subject || (stage == 1 && !ManagerRoles.Contains(member.Role)) ||
@@ -310,6 +398,45 @@ internal static class PurchaseEndpoints
         return Results.Accepted();
     }
 
+    private static async Task<IResult> DecideParallelAsync(FlowOpsDb db, Purchase purchase, string subject,
+        string decision, string? comment, CancellationToken token)
+    {
+        await using var transaction = await db.Database.BeginTransactionAsync(token);
+        var org = purchase.OrganizationId;
+        if (await OrganizationEndpoints.LockAsync(db, org, token) is null) return Results.NotFound();
+        var approval = (await db.Approvals.FromSqlInterpolated($"""
+            SELECT * FROM flowops."Approvals"
+            WHERE "OrganizationId" = {org} AND "PurchaseId" = {purchase.Id} AND "Stage" = 1 FOR UPDATE
+            """).ToListAsync(token)).SingleOrDefault();
+        if (approval is null) return Results.NotFound();
+        var votes = await db.ApprovalVotes.Where(x => x.OrganizationId == org && x.PurchaseId == purchase.Id && x.Stage == 1).ToListAsync(token);
+        var vote = votes.SingleOrDefault(x => x.Subject == subject);
+        if (vote is null) return Results.NotFound();
+        if (subject == purchase.Requester || !await db.Memberships.AnyAsync(x => x.OrganizationId == org &&
+            x.Subject == subject && ManagerRoles.Contains(x.Role), token)) return Results.StatusCode(403);
+        if (vote.Decision is not null)
+            return vote.Decision == decision && vote.Comment == comment ? Results.Accepted() : Results.Conflict(new { code = "alreadyDecided" });
+        if (approval.Decision is not null) return Results.Conflict(new { code = "alreadyDecided" });
+        vote.Decision = decision;
+        vote.Comment = comment;
+        vote.DecidedAt = DateTimeOffset.UtcNow;
+        Record(db, purchase, subject, $"vote-{decision}");
+        var accepted = votes.Count(x => x.Decision == "approved");
+        var outstanding = votes.Count(x => x.Decision is null);
+        var minimum = purchase.MinimumApprovals!.Value;
+        if (decision == "changesRequested" || accepted >= minimum || accepted + outstanding < minimum)
+        {
+            approval.Decision = decision == "changesRequested" ? decision : accepted >= minimum ? "approved" : "rejected";
+            if (decision == "changesRequested") approval.Comment = comment;
+            approval.DecidedAt = vote.DecidedAt;
+            Record(db, purchase, "system", $"manager-{approval.Decision}");
+            db.WorkflowCommands.Add(new() { OrganizationId = org, PurchaseId = purchase.Id, Stage = 1 });
+        }
+        await db.SaveChangesAsync(token);
+        await transaction.CommitAsync(token);
+        return Results.Accepted();
+    }
+
     private static IResult DecisionReplay(Approval approval, string decision, string? comment) =>
         approval.Decision == decision && approval.Comment == comment ? Results.Accepted() : Results.Conflict(new { code = "alreadyDecided" });
 
@@ -329,6 +456,6 @@ internal static class PurchaseEndpoints
 
 internal sealed record OrganizationInput(string? Name, string? Slug);
 internal sealed record PurchaseInput(Guid Id, string? Title, string? Description, string? Category, string? Currency, decimal Amount,
-    Guid? WorkflowId = null, int? WorkflowVersion = null, string? Priority = null);
+    Guid? WorkflowId = null, int? WorkflowVersion = null, string? Priority = null, Guid? PreviousPurchaseId = null);
 internal sealed record DecisionInput(string? Decision, string? Comment);
 internal sealed record MonthlyActivity(int Year, int Month, string Status, int Count);

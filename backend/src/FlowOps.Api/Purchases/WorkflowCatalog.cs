@@ -134,10 +134,13 @@ internal static class WorkflowCatalog
             if (!graph.CanPublish()) return Results.BadRequest(new { code = "invalidGraph" });
             if (flow.PublishedRevision == flow.Revision) return null;
             var number = (flow.PublishedVersion ?? 0) + 1;
+            var matrix = graph.UseApprovalMatrix
+                ? await db.Organizations.Where(org => org.Id == organizationId).Select(org => org.ApprovalMatrixJson).SingleAsync(token)
+                : null;
             var definitionId = await PurchaseGraphCompiler.PublishAsync(flow, graph, number, publisher, store, token);
             db.PurchaseWorkflowVersions.Add(new PurchaseWorkflowVersion { OrganizationId = organizationId, WorkflowId = workflowId,
                 Number = number, Name = flow.Name, FinanceThreshold = flow.FinanceThreshold, GraphJson = graph.Serialize(),
-                ElsaVersion = PurchaseApprovalWorkflow.EngineVersion, ElsaDefinitionId = definitionId });
+                ElsaVersion = PurchaseApprovalWorkflow.EngineVersion, ElsaDefinitionId = definitionId, ApprovalMatrixSnapshot = matrix });
             flow.PublishedVersion = number;
             flow.PublishedRevision = flow.Revision;
             flow.Unpublished = false;

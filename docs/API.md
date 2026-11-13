@@ -21,11 +21,24 @@ The frontend forwards same-origin requests to ASP.NET Core. Authenticated writes
 | POST | /api/organizations/{org}/workflows/{id}/unpublish | Pause new submissions using the current draft revision |
 | POST | /api/organizations/{org}/workflows/{id}/duplicate | Copy the saved settings to a new draft using `name` and `revision` |
 | POST | /api/organizations/{org}/workflows/{id}/archive | Archive a workflow and stop new submissions |
+| GET | /api/organizations/{org}/workflows/{id}/simulation | List saved scenarios, runs and selectable published versions with `page` and `versionPage` |
+| POST | /api/organizations/{org}/workflows/{id}/simulation | Run with `input` containing `amount`, `manager`, `finance`, and either `version` or `revision`. Pass `scenarioName` to save the inputs. |
+| GET | /api/organizations/{org}/workflows/{id}/simulation/runs/{runId} | Read the stored graph, inputs, trace and validation report |
+| GET / POST | /api/organizations/{org}/forms | List forms or create a schema with `name` and `fields` |
+| GET | /api/organizations/{org}/forms/{formId} | Read draft, current revision, and published version history |
+| GET | /api/organizations/{org}/forms/{formId}/versions/{version} | Read the immutable field schema as a process editor |
+| POST | /api/organizations/{org}/forms/{formId}/draft | Save `schema` with the current `revision`. Returns the resulting revision. |
+| POST | /api/organizations/{org}/forms/{formId}/publish | Publish an immutable form version from the current `revision` |
 | GET | /api/organizations/{org}/workspace | Personal requests and assigned approvals use `page`. Notifications use `notificationPage` and return `notificationHasMore`. Each list shows up to 10 items. Optional `months=6\|12\|48` adds personal purchase counts by UTC month and status. |
 | GET | /api/organizations/{org}/tasks | Paginated approval tasks assigned to the current member. Filter with `status=pending|overdue|completed`, `priority=low|normal|high`, and `page` |
 | POST | /api/organizations/{org}/purchases | Submit a purchase using a client-generated UUID for retries |
 | GET | /api/organizations/{org}/purchases/{id} | Purchase, decision stages, and audit history |
 | POST | /api/organizations/{org}/purchases/{id}/approvals/{stage} | Record an assigned decision |
+| POST | /api/organizations/{org}/purchases/{id}/approvals/{stage}/delegate | The current reviewer transfers an open task to an eligible reviewer. Send `assignee` and `expectedAssignee`. The original deadline and Elsa bookmark are preserved. |
+| POST | /api/organizations/{org}/purchases/{id}/cancel | The requester cancels a purchase waiting for a decision. The API records the cancellation and queues Elsa cleanup. |
+| GET / POST | /api/organizations/{org}/approval-delegation | Read or update the caller's delegation window. Send `delegate`, `startsAt` and `endsAt`. Use a null delegate to remove the schedule. |
+| GET / POST | /api/organizations/{org}/approval-matrix | Read the organization's rule list or save it with the current `revision` |
+| POST | /api/organizations/{org}/approval-matrix/preview | Evaluate proposed rules against an amount, category, requester role and optional department |
 | POST | /api/organizations/{org}/notifications/{id}/read | Mark an owned notification as read |
 | GET | /health/live and /health/ready | Liveness and PostgreSQL readiness |
 
@@ -63,8 +76,12 @@ Routes under `/api/organizations/{org}/processes` support listing, creating, vie
 
 The process catalog accepts `page` and returns up to 10 definitions. Process detail accepts `page` for run history and returns up to eight runs with their tasks. Purchase workflow detail accepts `page` for runs and `versionPage` for published versions.
 
+A process draft can include `form: { id, version, inputMap }` to bind a published form in the same organization. The optional input map associates field keys with Elsa input names. For bound manual processes, post `version`, `revision` and `answers` to `/{processId}/submission-draft`. Include the resulting `draftRevision` in the final run request to clear that revision atomically with submission.
+
 Use the organization session or a Keycloak access token for the webhook endpoint. The token's subject must have permission to start runs in the organization. Download via `/{processId}/runs/{runId}/attachment` as the submitter, an assigned participant, or a member with permission to view all runs. With S3 configured, attachments can be up to 10 MiB. Otherwise the limit is 1 MiB.
 
-`GET /api/organizations/{org}/process-tasks` lists pending assignments for the caller. Pass `page` to receive a page of up to 10 assignments with `page` and `hasMore`. Complete via `POST /{processId}/runs/{runId}/tasks/{stepId}/complete` under the process route. Only the assignee can complete a task. Repeating completion returns 204.
+`GET /api/organizations/{org}/process-tasks` lists pending assignments for the caller, including the optional `dueAt`. Pass `page` to receive a page of up to 10 assignments with `page` and `hasMore`. Complete via `POST /{processId}/runs/{runId}/tasks/{stepId}/complete` under the process route. Only the current assignee can complete a task. Repeating completion returns 204.
+
+The organization approval SLA policy supplies business-calendar deadlines for purchases and general processes. A process run snapshots the policy when started. A task can be reassigned when overdue; the completion route and deadline stay the same. The process detail returns `dueAt` and `escalatedAt` for visible runs and tasks. Workspace notifications for processes identify the `processId` and `processRunId`; purchase notifications identify the `purchaseId`.
 
 `POST /api/organizations/{org}/settings/process-permissions` accepts the role-to-permission map returned by organization settings. The owner controls the `edit`, `run`, and `inspect` flags for configurable roles.

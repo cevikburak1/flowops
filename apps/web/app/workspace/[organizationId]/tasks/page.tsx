@@ -6,6 +6,7 @@ import { label } from "../../../../lib/messages";
 import { getApi, getLocale, messages, type Profile } from "../../../../lib/server";
 import { priorities, taskStatuses, taskText, type TaskPage } from "../../../../lib/tasks";
 import { processText } from "../../../../lib/processes";
+import { ApprovalDelegationEditor, type DelegationSettings } from "../../../../components/approval-delegation";
 
 export default async function Tasks({ params, searchParams }: {
   params: Promise<{ organizationId: string }>;
@@ -24,10 +25,12 @@ export default async function Tasks({ params, searchParams }: {
     if (priority) values.set("priority", priority);
     return values.toString();
   }
-  const [data, processTasks] = await Promise.all([
+  const delegationApi = `/api/organizations/${organization.id}/approval-delegation`;
+  const [data, processTasks, delegation] = await Promise.all([
     getApi<TaskPage>(`/api/organizations/${organization.id}/tasks?${filters(page)}`),
-    getApi<{ items: { processId: string; runId: string; stepId: string; title: string }[]; page: number; hasMore: boolean }>(
-      `/api/organizations/${organization.id}/process-tasks?page=${processPage}`)
+    getApi<{ items: { processId: string; runId: string; stepId: string; title: string; dueAt: string | null }[]; page: number; hasMore: boolean }>(
+      `/api/organizations/${organization.id}/process-tasks?page=${processPage}`),
+    getApi<DelegationSettings>(delegationApi),
   ]);
   const t = taskText[locale];
   const common = messages[locale];
@@ -35,10 +38,12 @@ export default async function Tasks({ params, searchParams }: {
 
   return <Shell profile={profile} organization={organization} locale={locale} active="tasks">
     <header className="page-header"><h1>{t.title}</h1></header>
+    <ApprovalDelegationEditor api={delegationApi} data={delegation} locale={locale} />
     {(processTasks.items?.length > 0 || processTasks.page > 1) && <section className="panel detail-panel mb-4">
       <h2 id="process-tasks">{processText[locale].myTasks}</h2>
       <ul className="decisions">{processTasks.items.map(task => <li key={`${task.runId}:${task.stepId}`}>
         <Link className="underline break-words" href={`${base}/processes/${task.processId}?runId=${task.runId}#task-${task.runId}-${task.stepId}`}>{task.title}</Link>
+        {task.dueAt && <span className="row-meta">{t.dueAt} <time dateTime={task.dueAt}>{date.format(new Date(task.dueAt))} UTC</time></span>}
       </li>)}</ul>
       <Pagination page={processTasks.page} more={processTasks.hasMore}
         href={next => `?${filters(data.page)}&processPage=${next}#process-tasks`} locale={locale} label={processText[locale].myTasks} />
