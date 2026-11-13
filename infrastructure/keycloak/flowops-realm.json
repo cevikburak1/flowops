@@ -1,0 +1,53 @@
+{
+  "realm": "flowops",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "bruteForceProtected": true,
+  "clients": [
+    {
+      "clientId": "flowops-web",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "secret": "${FLOWOPS_OIDC_SECRET}",
+      "redirectUris": ["http://localhost:3000/auth/callback"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:3000/"
+      },
+      "protocolMappers": [
+        {
+          "name": "flowops-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": { "included.custom.audience": "flowops-api", "access.token.claim": "true", "id.token.claim": "false" }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "id": "92d58048-838b-4fc3-8ff8-aa8c48b86dac",
+      "username": "employee",
+      "firstName": "Avery", "lastName": "Morgan",
+      "email": "employee@example.test", "emailVerified": true, "enabled": true,
+      "credentials": [{ "type": "password", "value": "${FLOWOPS_DEV_PASSWORD}", "temporary": false }]
+    },
+    {
+      "id": "fba63122-ae97-4cd4-b5ac-58d8087cdd18",
+      "username": "manager",
+      "firstName": "Morgan", "lastName": "Reed",
+      "email": "manager@example.test", "emailVerified": true, "enabled": true,
+      "credentials": [{ "type": "password", "value": "${FLOWOPS_DEV_PASSWORD}", "temporary": false }]
+    },
+    {
+      "id": "b4fc7d75-09a6-46fb-8fb2-fcd4dbc74af4",
+      "username": "finance",
+      "firstName": "Casey", "lastName": "Quinn",
+      "email": "finance@example.test", "emailVerified": true, "enabled": true,
+      "credentials": [{ "type": "password", "value": "${FLOWOPS_DEV_PASSWORD}", "temporary": false }]
+    }
+  ]
+}

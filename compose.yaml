@@ -1,0 +1,118 @@
+name: flowops
+services:
+  postgres:
+    image: postgres:16.14-alpine
+    environment:
+      POSTGRES_USER: flowops
+      POSTGRES_DB: flowops
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infrastructure/postgres/init.sql:/docker-entrypoint-initdb.d/10-databases.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flowops -d flowops"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.2
+    command: start-dev --import-realm
+    environment:
+      KC_HOSTNAME: http://localhost:58080
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: flowops
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      KC_BOOTSTRAP_ADMIN_USERNAME: flowops-admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Set KEYCLOAK_ADMIN_PASSWORD in .env}
+      FLOWOPS_OIDC_SECRET: ${FLOWOPS_OIDC_SECRET:?Set FLOWOPS_OIDC_SECRET in .env}
+      FLOWOPS_DEV_PASSWORD: ${FLOWOPS_DEV_PASSWORD:?Set FLOWOPS_DEV_PASSWORD in .env}
+      KC_HEALTH_ENABLED: "true"
+    volumes:
+      - ./infrastructure/keycloak/flowops-realm.json:/opt/keycloak/data/import/flowops-realm.json:ro
+    ports:
+      - "127.0.0.1:58080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/9000 && printf \"GET /health/ready HTTP/1.0\\r\\n\\r\\n\" >&3 && grep -q \"200 OK\" <&3'"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+  redis:
+    image: redis:7.4.9-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+  rabbitmq:
+    image: rabbitmq:4.2.7-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: flowops
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}
+    volumes:
+      - rabbit-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+    restart: unless-stopped
+  n8n:
+    profiles: ["integrations"]
+    image: n8nio/n8n:2.47.7
+    environment:
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-}
+      N8N_HOST: localhost
+      N8N_PROTOCOL: http
+      N8N_EDITOR_BASE_URL: http://localhost:55678
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_PERSONALIZATION_ENABLED: "false"
+    ports:
+      - "127.0.0.1:55678:5678"
+    volumes:
+      - n8n-data:/home/node/.n8n
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5678/healthz/readiness').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+    restart: unless-stopped
+  mailpit:
+    profiles: ["integrations"]
+    image: axllent/mailpit:v1.30.3
+    ports:
+      - "127.0.0.1:58025:8025"
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+  object-storage:
+    profiles: ["integrations"]
+    image: chrislusf/seaweedfs:4.32
+    command: ["mini", "-dir=/data"]
+    environment:
+      AWS_ACCESS_KEY_ID: flowops-dev
+      AWS_SECRET_ACCESS_KEY: ${OBJECT_STORAGE_SECRET:-}
+      S3_BUCKET: flowops-dev
+    volumes:
+      - object-data:/data
+    restart: unless-stopped
+volumes:
+  postgres-data:
+  redis-data:
+  rabbit-data:
+  n8n-data:
+  object-data:

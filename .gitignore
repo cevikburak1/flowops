@@ -1,0 +1,16 @@
+.env
+.env.local
+!.env.example
+.cache/
+.tools/
+.hallmark/shots/
+.agents/skills/impeccable/scripts/bin/
+node_modules/
+.next/
+next-env.d.ts
+*.tsbuildinfo
+bin/
+obj/
+TestResults/
+playwright-report/
+test-results/

@@ -1,0 +1,53 @@
+name: Verify
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.17.0
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: backend/global.json
+      - name: Frontend checks
+        working-directory: apps/web
+        run: |
+          npm ci --ignore-scripts
+          npm run lint
+          npm run typecheck
+          npm run build
+          npm audit --omit=dev --audit-level=high
+      - name: Backend checks
+        working-directory: backend
+        run: |
+          dotnet restore src/FlowOps.Api
+          dotnet build src/FlowOps.Api --no-restore -c Release
+      - name: Browser acceptance tests
+        shell: pwsh
+        run: |
+          ./infrastructure/dev.ps1 init
+          docker compose up -d --wait
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Push-Location apps/web
+          npx --no-install playwright install --with-deps chromium
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Pop-Location
+          ./infrastructure/ci-browser.ps1
+      - name: Build container images
+        run: |
+          docker build -t flowops-api:ci backend
+          docker build -t flowops-web:ci apps/web
+      - name: Stop test dependencies
+        if: always()
+        run: docker compose down

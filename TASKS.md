@@ -1,0 +1,28 @@
+# Implementation checkpoints
+
+- [x] Initialize Git and establish persistent Codex instructions.
+- [x] Install Impeccable, Hallmark, and Unslop at project scope and inspect their manifests.
+- [x] Confirm that Codex discovers all three project design skills in a fresh session.
+- [ ] Approve the Impeccable hook in `/hooks`.
+- [x] Verify PostgreSQL, Keycloak, Redis and RabbitMQ container health, .NET 11 API, FlowOps and Elsa migrations, and Next.js build.
+- [x] Verify Keycloak login and logout, tenant creation and switching, and cross-tenant purchase access rejection.
+- [x] Verify the initial workspace across 1440, 1024, 768 and 390px, mobile keyboard navigation, language switching, and light and dark accessibility samples.
+- [x] Verify purchase submission, Elsa pause/resume, manager and finance approval, rejection, idempotent submission, concurrent decisions, audit, notifications, and a manual API restart during the finance wait.
+- [x] Start n8n 2.47.7, Mailpit 1.30.3, and S3-compatible SeaweedFS 4.32 locally. Confirm n8n readiness and Mailpit health.
+- [x] Run four Playwright acceptance tests, TypeScript checks, ESLint, and the .NET Release build. Hallmark's rendered checks and Impeccable's source scans completed with zero findings.
+- [x] Build the Linux API and web container images locally and confirm that both declare non-root users.
+- [x] Add member listing, email-bound invitations and revocation, role and manager assignment, and configurable finance routing. Verify a new organization can complete a purchase using its own invited manager.
+- [x] Run five Playwright acceptance tests against the migrated database, including invitation identity checks and responsive, light/dark accessibility checks on organization settings.
+- [ ] Add member removal, organization audit browsing, and email delivery for invitations.
+- [ ] Add xUnit and Testcontainers coverage and automate the restart test in CI.
+- [ ] Run the GitHub Actions workflow on a hosted runner. Verify production topology, key persistence, recovery procedures, and container runtime configuration.
+- [ ] Resolve development-only npm audit findings and verify signed S3 reads and writes with application credentials.
+- [x] Phase 5 purchase workflow catalog with tenant-scoped drafts, publication, immutable versions, archiving, and execution history.
+- [x] Verify that a published version executes in Elsa, a stale submission is rejected, and an active purchase completes on its original version after publishing and archiving.
+- [x] Phase 5 catalog search, status filters, duplication, and unpublishing. Verify in Playwright that unpublishing blocks new requests, republishing creates a new version, copies start as independent drafts, and existing executions finish.
+- [x] Phase 6 purchase workflow editor with draggable nodes, connection editing, versioned graph drafts, and publication validation for manager-only and threshold-based finance approval. Verify that a published graph affects Elsa execution and that later graph changes preserve in-flight behavior.
+- [x] Phase 6 purchase graph compilation into persistent Elsa Flowcharts, manager-decision and in-app notification nodes, and execution status on the canvas. Verify compiled approval, rejection, and finance branches.
+- [ ] Extend the builder beyond purchase workflows with parallel, timer, webhook, HTTP, form, and assignment nodes.
+- [ ] Advanced tasks, teams, roles, forms, and attachments.
+- [ ] RabbitMQ outbox delivery, SignalR, email, and n8n operator integrations.
+- [ ] Analytics, reporting, subscriptions, administration, and production hardening.

@@ -1,0 +1,68 @@
+const en = {
+  signIn: "Sign in", signOut: "Sign out", openWorkspace: "Open workspace",
+  heroTitle: "See every purchase through", heroBody: "Submit purchase requests, route approvals, and keep a record of every decision in one workspace.",
+  purchaseWorkflow: "Purchase approval process", stepSubmit: "Submit a request", stepSubmitBody: "Capture the purchase, amount, and reason.",
+  stepReview: "Route for review", stepReviewBody: "Send the request to its assigned approvers.",
+  stepRecord: "Record the decision", stepRecordBody: "Keep the outcome and history with the request.",
+  language: "Language", theme: "Switch color theme", menu: "Workspace navigation", workspace: "Workspace", organization: "Organization",
+  overview: "Overview", requests: "My requests", approvals: "Approval center", notifications: "Notifications",
+  newRequest: "New purchase request", newOrganization: "Create organization", signInAgain: "Sign in to continue",
+  queue: "Assigned to you", submitted: "Submitted", complete: "Approved", review: "In review", pending: "Pending approvals",
+  purchase: "Purchase", amount: "Amount", category: "Category", status: "Status", date: "Submitted on",
+  emptyRequests: "Your submitted purchase requests will appear here.", emptyApprovals: "You have no pending approvals.",
+  emptyNotifications: "You have no notifications.", back: "Back to workspace", title: "Purchase title",
+  description: "Business reason", chooseCategory: "Select a category", submit: "Submit request", saving: "Saving…",
+  cancel: "Cancel", name: "Organization name", slug: "Organization slug", create: "Create organization",
+  apiError: "FlowOps could not complete this request. Try again.", conflict: "The record changed or the workspace is missing an approver.",
+  activity: "Activity", decisions: "Review decisions", comment: "Decision note", approve: "Approve", reject: "Reject",
+  manager: "Manager review", finance: "Finance review", read: "Mark as read", previous: "Previous", next: "Next",
+  starting: "Starting", managerReview: "Manager review", financeReview: "Finance review",
+  approved: "Approved", rejected: "Rejected", approvalAssigned: "Approval assigned", workflowNotice: "Purchase workflow update",
+  "manager-approved": "Manager approved", "manager-rejected": "Manager rejected",
+  "finance-approved": "Finance approved", "finance-rejected": "Finance rejected",
+  equipment: "Equipment", software: "Software", services: "Services", supplies: "Supplies", other: "Other",
+  requestContext: "Purchase details", noOrganizations: "Create an organization to open your first workspace.",
+  pageError: "The workspace is temporarily unavailable", tryAgain: "Try again", notFound: "This item is unavailable",
+  confirmation: "Confirm decision", purchaseCurrency: "Currency",
+  processing: "Updating workflow status", decisionSaved: "Decision recorded", noManager: "Purchase submission requires an assigned manager.",
+  titleInvalid: "Enter 3 to 120 characters.", descriptionInvalid: "Enter 5 to 2,000 characters.",
+  amountInvalid: "Enter a positive amount with up to two decimal places.", categoryInvalid: "Select a category.",
+};
+
+const tr: typeof en = {
+  signIn: "Giriş yap", signOut: "Çıkış yap", openWorkspace: "Çalışma alanını aç",
+  heroTitle: "Her satın almayı sonuçlandırın", heroBody: "Satın alma taleplerini gönderin, onayları yönlendirin ve her kararı tek bir çalışma alanında kaydedin.",
+  purchaseWorkflow: "Satın alma onay süreci", stepSubmit: "Talep gönderin", stepSubmitBody: "Satın alma ayrıntılarını, tutarı ve gerekçeyi kaydedin.",
+  stepReview: "İncelemeye yönlendirin", stepReviewBody: "Talebi atanan onaylayıcılara gönderin.",
+  stepRecord: "Kararı kaydedin", stepRecordBody: "Sonucu ve geçmişi taleple birlikte saklayın.",
+  language: "Dil", theme: "Renk temasını değiştir", menu: "Çalışma alanı menüsü", workspace: "Çalışma alanı", organization: "Kuruluş",
+  overview: "Genel bakış", requests: "Taleplerim", approvals: "Onay merkezi", notifications: "Bildirimler",
+  newRequest: "Yeni satın alma talebi", newOrganization: "Kuruluş oluştur", signInAgain: "Devam etmek için giriş yapın",
+  queue: "Size atananlar", submitted: "Gönderildi", complete: "Onaylandı", review: "İncelemede", pending: "Bekleyen onaylar",
+  purchase: "Satın alma", amount: "Tutar", category: "Kategori", status: "Durum", date: "Gönderim tarihi",
+  emptyRequests: "Gönderdiğiniz satın alma talepleri burada görünür.", emptyApprovals: "Bekleyen onayınız yok.",
+  emptyNotifications: "Bildiriminiz yok.", back: "Çalışma alanına dön", title: "Satın alma başlığı",
+  description: "İş gerekçesi", chooseCategory: "Kategori seçin", submit: "Talebi gönder", saving: "Kaydediliyor…",
+  cancel: "İptal", name: "Kuruluş adı", slug: "Kuruluş kısa adı", create: "Kuruluş oluştur",
+  apiError: "İşlem tamamlanamadı. Tekrar deneyin.", conflict: "Kayıt değişti veya çalışma alanında bir onaylayıcı eksik.",
+  activity: "Etkinlik", decisions: "İnceleme kararları", comment: "Karar notu", approve: "Onayla", reject: "Reddet",
+  manager: "Yönetici incelemesi", finance: "Finans incelemesi", read: "Okundu olarak işaretle", previous: "Önceki", next: "Sonraki",
+  starting: "Başlatılıyor", managerReview: "Yönetici incelemesi", financeReview: "Finans incelemesi",
+  approved: "Onaylandı", rejected: "Reddedildi", approvalAssigned: "Onay görevi atandı", workflowNotice: "Satın alma akışı güncellemesi",
+  "manager-approved": "Yönetici onayladı", "manager-rejected": "Yönetici reddetti",
+  "finance-approved": "Finans onayladı", "finance-rejected": "Finans reddetti",
+  equipment: "Ekipman", software: "Yazılım", services: "Hizmetler", supplies: "Malzemeler", other: "Diğer",
+  requestContext: "Satın alma ayrıntıları", noOrganizations: "İlk çalışma alanınızı açmak için bir kuruluş oluşturun.",
+  pageError: "Çalışma alanına geçici olarak ulaşılamıyor", tryAgain: "Tekrar dene", notFound: "Bu öğeye ulaşılamıyor",
+  confirmation: "Kararı doğrula", purchaseCurrency: "Para birimi",
+  processing: "İş akışı durumu güncelleniyor", decisionSaved: "Karar kaydedildi", noManager: "Talep göndermek için bir yönetici atanmalıdır.",
+  titleInvalid: "3 ila 120 karakter girin.", descriptionInvalid: "5 ila 2.000 karakter girin.",
+  amountInvalid: "En fazla iki ondalık basamaklı pozitif bir tutar girin.", categoryInvalid: "Bir kategori seçin.",
+};
+
+export const messages = { en, tr };
+export type Locale = keyof typeof messages;
+export const categories = ["equipment", "software", "services", "supplies", "other"] as const;
+export function label(locale: Locale, value: string) {
+  return Object.hasOwn(messages[locale], value) ? messages[locale][value as keyof typeof en] : value;
+}
