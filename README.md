@@ -24,10 +24,14 @@ The two Elsa examples are FlowOps drafts. Create and publish them in FlowOps to 
 
 ### Purchase approval in Elsa
 
+![FlowOps workflow editor showing the manager approval, finance threshold, and finance review nodes](docs/images/workflow-studio-purchase.png)
+
+![FlowOps simulator showing the rejected USD 6,000 purchase, highlighted finance path, and execution trace](docs/images/workflow-studio-simulation.png)
+
 ```mermaid
 flowchart TD
     Request["Submit purchase"] --> Manager["Manager review"]
-    Manager -->|Approved| Threshold{"USD 5,000 or more?"}
+    Manager -->|Approved| Threshold{"Above USD 5,000?"}
     Manager -->|Rejected| Rejected["Rejected"]
     Threshold -->|No| Approved["Approved"]
     Threshold -->|Yes| Finance["Finance review"]
@@ -36,6 +40,8 @@ flowchart TD
 ```
 
 ### Parallel process in Elsa
+
+![FlowOps process editor showing two timer branches and a completed run in execution history](docs/images/workflow-studio-parallel.png)
 
 ```mermaid
 flowchart TD
