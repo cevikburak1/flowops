@@ -2,10 +2,12 @@ import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import type { Locale } from "./messages";
 import type { PurchaseExecutionData } from "../components/purchase-execution";
+import type { Priority } from "./tasks";
+import type { Member } from "./organization";
 export { messages } from "./messages";
 
 export interface Organization { id: string; name: string; slug: string; role: string; currency: string }
-export interface Profile { name: string; organizations: Organization[] }
+export interface Profile { name: string; organizations: Organization[]; isOperator: boolean }
 export interface Purchase {
   id: string; title: string; category: string; amount: number; currency: string; status: string; createdAt: string;
 }
@@ -23,9 +25,12 @@ export interface PurchaseDetail extends Purchase {
   workflow: { name: string; number: number } | null;
   execution: PurchaseExecutionData | null;
   description: string;
+  priority: Priority;
   processing: boolean;
   timeline: { action: string; at: string }[];
-  stages: { stage: number; decision: string | null; comment: string | null; canDecide: boolean }[];
+  stages: { stage: number; assignee: string; decision: string | null; comment: string | null; canDecide: boolean; dueAt: string }[];
+  assignmentHistory: { stage: number; assignee: string; actor: string; at: string }[];
+  eligibleMembers: Pick<Member, "subject" | "email" | "role">[] | null;
 }
 
 export async function getLocale(): Promise<Locale> {

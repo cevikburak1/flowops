@@ -17,7 +17,10 @@ internal static class OrganizationEndpoints
         tenant.MapPost("/invitations", InviteAsync);
         tenant.MapPost("/invitations/{invitationId:guid}/revoke", RevokeAsync);
         tenant.MapPost("/members/{memberSubject}/settings", UpdateMemberAsync);
+        tenant.MapPost("/groups", SaveGroupAsync);
+        tenant.MapPost("/groups/{groupId:guid}", UpdateGroupAsync);
         tenant.MapPost("/routing", UpdateRoutingAsync);
+        tenant.MapPost("/integrations/webhook", SetWebhookAsync);
     }
 
     internal static async Task<Organization?> LockAsync(FlowOpsDb db, Guid id, CancellationToken token) =>
@@ -40,12 +43,12 @@ internal static class OrganizationEndpoints
             parsed.Address == address ? address.ToLowerInvariant() : null;
     }
 
-    private static bool CanManage(string? role) => role is "OrganizationOwner" or "OrganizationAdmin";
+    internal static bool CanManage(string? role) => role is "OrganizationOwner" or "OrganizationAdmin";
 
     private static Task<Membership?> FindMemberAsync(FlowOpsDb db, Guid org, string subject, CancellationToken token) =>
         db.Memberships.SingleOrDefaultAsync(x => x.OrganizationId == org && x.Subject == subject, token);
 
-    private static async Task<Membership?> FindAdminAsync(FlowOpsDb db, Guid org, ClaimsPrincipal user, CancellationToken token)
+    internal static async Task<Membership?> FindAdminAsync(FlowOpsDb db, Guid org, ClaimsPrincipal user, CancellationToken token)
     {
         var member = await FindMemberAsync(db, org, PurchaseEndpoints.Subject(user), token);
         return CanManage(member?.Role) ? member : null;
@@ -54,19 +57,95 @@ internal static class OrganizationEndpoints
     private static IResult Invalid(string code) => Results.BadRequest(new { code });
     private static IResult Conflict(string code) => Results.Conflict(new { code });
 
-    private static async Task<IResult> GetAsync(Guid organizationId, ClaimsPrincipal user, FlowOpsDb db, CancellationToken token)
+    private static async Task<IResult> GetAsync(Guid organizationId, ClaimsPrincipal user, FlowOpsDb db, IConfiguration config, CancellationToken token)
     {
         var actor = await FindAdminAsync(db, organizationId, user, token);
         if (actor is null) return Results.NotFound();
         var organization = await db.Organizations.AsNoTracking().SingleAsync(x => x.Id == organizationId, token);
         var members = await db.Memberships.AsNoTracking().Where(x => x.OrganizationId == organizationId)
-            .OrderBy(x => x.Email).ThenBy(x => x.Subject).Select(x => new { x.Subject, x.Email, x.Role, x.Manager }).ToListAsync(token);
+            .OrderBy(x => x.Email).ThenBy(x => x.Subject)
+            .Select(x => new { x.Subject, x.Email, x.Role, x.Manager, x.TeamId, x.DepartmentId }).ToListAsync(token);
+        var groups = await db.OrganizationGroups.AsNoTracking().Where(x => x.OrganizationId == organizationId)
+            .OrderBy(x => x.Kind).ThenBy(x => x.Name).ToListAsync(token);
         var now = DateTimeOffset.UtcNow;
         var invitations = await db.Invitations.AsNoTracking()
             .Where(x => x.OrganizationId == organizationId && x.ExpiresAt > now && x.AcceptedAt == null && x.RevokedAt == null)
             .OrderByDescending(x => x.ExpiresAt).Select(x => new { x.Id, x.Email, x.Role, x.ExpiresAt }).ToListAsync(token);
-        return Results.Ok(new { Members = members, Invitations = invitations, organization.FinanceThreshold,
-            organization.FinanceApprover, CanAssignAdmin = actor.Role == "OrganizationOwner" });
+        return Results.Ok(new { Members = members, Groups = groups, Invitations = invitations, organization.FinanceThreshold,
+            organization.FinanceApprover, organization.WebhookEnabled,
+            WebhookAvailable = !string.IsNullOrEmpty(config["Integrations:Webhook:Url"]),
+            CanAssignAdmin = actor.Role == "OrganizationOwner" });
+    }
+
+    private static async Task<IResult> SetWebhookAsync(Guid organizationId, WebhookInput input, ClaimsPrincipal user,
+        FlowOpsDb db, IConfiguration config, CancellationToken token)
+    {
+        await using var transaction = await db.Database.BeginTransactionAsync(token);
+        var organization = await LockAsync(db, organizationId, token);
+        var actor = await FindAdminAsync(db, organizationId, user, token);
+        if (organization is null || actor is null) return Results.NotFound();
+        if (input.Enabled && string.IsNullOrEmpty(config["Integrations:Webhook:Url"])) return Conflict("webhookUnavailable");
+        if (organization.WebhookEnabled == input.Enabled) return Results.NoContent();
+        organization.WebhookEnabled = input.Enabled;
+        Record(db, organizationId, actor.Subject, input.Enabled ? "webhookEnabled" : "webhookDisabled", null);
+        await db.SaveChangesAsync(token);
+        await transaction.CommitAsync(token);
+        return Results.NoContent();
+    }
+
+    private static Task<IResult> SaveGroupAsync(Guid organizationId, GroupInput input, ClaimsPrincipal user, FlowOpsDb db,
+        CancellationToken token) => SaveGroupCoreAsync(organizationId, null, input, user, db, token);
+
+    private static Task<IResult> UpdateGroupAsync(Guid organizationId, Guid groupId, GroupInput input, ClaimsPrincipal user,
+        FlowOpsDb db, CancellationToken token) => SaveGroupCoreAsync(organizationId, groupId, input, user, db, token);
+
+    private static async Task<IResult> SaveGroupCoreAsync(Guid organizationId, Guid? groupId, GroupInput input, ClaimsPrincipal user,
+        FlowOpsDb db, CancellationToken token)
+    {
+        await using var transaction = await db.Database.BeginTransactionAsync(token);
+        if (await LockAsync(db, organizationId, token) is null ||
+            await FindAdminAsync(db, organizationId, user, token) is not { } actor) return Results.NotFound();
+        var name = input.Name?.Trim();
+        if (input.Kind is not ("team" or "department") || name is not { Length: >= 2 and <= 80 })
+            return Invalid("invalidGroup");
+        var lead = string.IsNullOrEmpty(input.Lead) ? null : input.Lead;
+        if (lead is not null && !await db.Memberships.AnyAsync(x => x.OrganizationId == organizationId &&
+            x.Subject == lead && PurchaseEndpoints.ManagerRoles.Contains(x.Role), token)) return Invalid("invalidManager");
+        if (await db.OrganizationGroups.AnyAsync(x => x.OrganizationId == organizationId && x.Kind == input.Kind &&
+            x.Name == name && x.Id != groupId, token)) return Conflict("groupExists");
+        if (groupId is Guid id)
+        {
+            var group = await db.OrganizationGroups.SingleOrDefaultAsync(x => x.OrganizationId == organizationId &&
+                x.Id == id && x.Kind == input.Kind, token);
+            if (group is null) return Results.NotFound();
+            group.Name = name;
+            group.Lead = lead;
+            Record(db, organizationId, actor.Subject, "groupUpdated", group.Id.ToString());
+        }
+        else
+        {
+            var group = new OrganizationGroup { OrganizationId = organizationId, Kind = input.Kind, Name = name, Lead = lead };
+            db.OrganizationGroups.Add(group);
+            Record(db, organizationId, actor.Subject, "groupCreated", group.Id.ToString());
+        }
+        await db.SaveChangesAsync(token);
+        await transaction.CommitAsync(token);
+        return Results.NoContent();
+    }
+
+    internal static IQueryable<OrganizationGroup> GroupsFor(FlowOpsDb db, Membership member) =>
+        db.OrganizationGroups.Where(x => x.OrganizationId == member.OrganizationId &&
+            (x.Id == member.TeamId || x.Id == member.DepartmentId));
+
+    internal static async Task<string?> ResolveManagerAsync(FlowOpsDb db, Membership member, CancellationToken token)
+    {
+        if (member.Manager is not null) return member.Manager;
+        return await (from unit in GroupsFor(db, member)
+            join lead in db.Memberships on new { unit.OrganizationId, Subject = unit.Lead }
+                equals new { lead.OrganizationId, Subject = (string?)lead.Subject }
+            where lead.Subject != member.Subject && PurchaseEndpoints.ManagerRoles.Contains(lead.Role)
+            orderby unit.Kind descending
+            select lead.Subject).FirstOrDefaultAsync(token);
     }
 
     private static async Task<IResult> InviteAsync(Guid organizationId, InviteInput input, ClaimsPrincipal user, FlowOpsDb db, CancellationToken token)
@@ -174,10 +253,22 @@ internal static class OrganizationEndpoints
             var losesManager = PurchaseEndpoints.ManagerRoles.Contains(member.Role) && !PurchaseEndpoints.ManagerRoles.Contains(role);
             var losesFinance = member.Role == "Approver" && role != "Approver";
             if ((losesManager && await db.Memberships.AnyAsync(x => x.OrganizationId == organizationId && x.Manager == member.Subject, token)) ||
+                (losesManager && await db.OrganizationGroups.AnyAsync(x => x.OrganizationId == organizationId && x.Lead == member.Subject, token)) ||
                 (losesFinance && organization.FinanceApprover == member.Subject) ||
+                await db.Approvals.AnyAsync(x => x.OrganizationId == organizationId && x.Assignee == member.Subject &&
+                    x.Decision == null && ((x.Stage == 1 && losesManager) || (x.Stage == 2 && losesFinance)), token) ||
                 await db.Purchases.AnyAsync(x => x.OrganizationId == organizationId && x.Status != "approved" && x.Status != "rejected" &&
                     ((losesManager && x.Manager == member.Subject) || (losesFinance && x.Finance == member.Subject)), token))
                 return Conflict("memberHasAssignments");
+        }
+        if (input.Groups is { } groups)
+        {
+            var available = db.OrganizationGroups.Where(x => x.OrganizationId == organizationId);
+            if ((groups.TeamId.HasValue && !await available.AnyAsync(x => x.Id == groups.TeamId && x.Kind == "team", token)) ||
+                (groups.DepartmentId.HasValue && !await available.AnyAsync(x => x.Id == groups.DepartmentId && x.Kind == "department", token)))
+                return Invalid("invalidGroup");
+            member.TeamId = groups.TeamId;
+            member.DepartmentId = groups.DepartmentId;
         }
         member.Role = role!;
         member.Manager = manager;
@@ -213,5 +304,8 @@ internal static class OrganizationEndpoints
 
 internal sealed record InviteInput(string? Email, string? Role);
 internal sealed record AcceptInput(string? Code);
-internal sealed record MemberInput(string? Role, string? Manager);
+internal sealed record MemberInput(string? Role, string? Manager, MemberGroups? Groups);
+internal sealed record MemberGroups(Guid? TeamId, Guid? DepartmentId);
+internal sealed record GroupInput(string? Kind, string? Name, string? Lead);
+internal sealed record WebhookInput(bool Enabled);
 internal sealed record RoutingInput(decimal? Threshold, string? FinanceApprover);

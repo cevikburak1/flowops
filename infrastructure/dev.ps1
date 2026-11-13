@@ -57,6 +57,10 @@ $env:ASPNETCORE_URLS = 'http://127.0.0.1:5080'
 $env:ConnectionStrings__FlowOps = "Host=localhost;Port=55432;Database=flowops;Username=flowops;Password=$($config.POSTGRES_PASSWORD)"
 $env:Auth__ClientSecret = $config.FLOWOPS_OIDC_SECRET
 $env:FlowOps__SeedDevelopment = 'true'
+if (!$env:Integrations__RabbitMq) {
+    $rabbitPassword = [Uri]::EscapeDataString($config.RABBITMQ_PASSWORD)
+    $env:Integrations__RabbitMq = "amqp://flowops:${rabbitPassword}@localhost:55672"
+}
 $env:DOTNET_CLI_HOME = Join-Path $root '.cache/dotnet-home'
 $env:NUGET_PACKAGES = Join-Path $root '.cache/nuget'
 $sdk = Join-Path $root '.tools/dotnet/dotnet.exe'

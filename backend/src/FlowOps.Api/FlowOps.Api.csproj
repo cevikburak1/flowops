@@ -14,5 +14,6 @@
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
     <PackageReference Include="Elsa" Version="3.9.0" />
     <PackageReference Include="Elsa.Persistence.EFCore.PostgreSql" Version="3.9.0" />
+    <PackageReference Include="RabbitMQ.Client" Version="7.2.2" />
   </ItemGroup>
 </Project>

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { categories, label, messages, type Locale } from "../lib/messages";
 import { Button } from "./ui/button";
 import { workflowText, type PublishedWorkflow } from "../lib/workflows";
+import { priorities, taskText } from "../lib/tasks";
 
 async function send(path: string, payload?: object) {
   return fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload ?? {}) });
@@ -66,6 +67,9 @@ export function PurchaseForm({ organizationId, currency, locale, workflow }: {
         <option value="" disabled>{t.chooseCategory}</option>{categories.map(category => <option key={category} value={category}>{label(locale, category)}</option>)}
       </select>{feedback("category", t.categoryInvalid)}</label>
     </div>
+    <label>{taskText[locale].priority}<select name="priority" defaultValue="normal">
+      {priorities.map(priority => <option key={priority} value={priority}>{taskText[locale][priority]}</option>)}
+    </select></label>
     <label>{t.description}<textarea name="description" required minLength={5} maxLength={2000} rows={5} {...validation("description")} />{feedback("description", t.descriptionInvalid)}</label>
     {error && <p className="error-text" role="alert">{error}</p>}
     <Button type="submit" disabled={busy}>{busy ? t.saving : t.submit}</Button>

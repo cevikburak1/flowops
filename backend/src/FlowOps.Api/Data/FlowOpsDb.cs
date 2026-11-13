@@ -7,12 +7,15 @@ internal sealed class FlowOpsDb(DbContextOptions<FlowOpsDb> options) : DbContext
 {
     public DbSet<Organization> Organizations => Set<Organization>();
     public DbSet<Membership> Memberships => Set<Membership>();
+    public DbSet<OrganizationGroup> OrganizationGroups => Set<OrganizationGroup>();
+    public DbSet<ApprovalAssignment> ApprovalAssignments => Set<ApprovalAssignment>();
     public DbSet<Invitation> Invitations => Set<Invitation>();
     public DbSet<OrganizationEvent> OrganizationEvents => Set<OrganizationEvent>();
     public DbSet<Purchase> Purchases => Set<Purchase>();
     public DbSet<Approval> Approvals => Set<Approval>();
     public DbSet<AuditEvent> Audit => Set<AuditEvent>();
     public DbSet<Notification> Notifications => Set<Notification>();
+    public DbSet<NotificationDelivery> NotificationDeliveries => Set<NotificationDelivery>();
     public DbSet<WorkflowCommand> WorkflowCommands => Set<WorkflowCommand>();
     public DbSet<PurchaseWorkflowDefinition> PurchaseWorkflows => Set<PurchaseWorkflowDefinition>();
     public DbSet<PurchaseWorkflowVersion> PurchaseWorkflowVersions => Set<PurchaseWorkflowVersion>();
@@ -22,9 +25,17 @@ internal sealed class FlowOpsDb(DbContextOptions<FlowOpsDb> options) : DbContext
         model.HasDefaultSchema("flowops");
         model.Entity<Organization>().HasIndex(x => x.Slug).IsUnique();
         model.Entity<Organization>().Property(x => x.FinanceThreshold).HasPrecision(14, 2);
+        model.Entity<Organization>().Property(x => x.Plan).HasDefaultValue("starter");
         model.Entity<Membership>().HasKey(x => new { x.OrganizationId, x.Subject });
         model.Entity<Membership>().HasIndex(x => x.Subject);
         model.Entity<Membership>().HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId);
+        model.Entity<OrganizationGroup>().HasKey(x => new { x.OrganizationId, x.Id });
+        model.Entity<OrganizationGroup>().HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId);
+        model.Entity<OrganizationGroup>().HasIndex(x => new { x.OrganizationId, x.Kind, x.Name }).IsUnique();
+        model.Entity<Membership>().HasOne<OrganizationGroup>().WithMany()
+            .HasForeignKey(x => new { x.OrganizationId, Id = x.TeamId }).OnDelete(DeleteBehavior.Restrict);
+        model.Entity<Membership>().HasOne<OrganizationGroup>().WithMany()
+            .HasForeignKey(x => new { x.OrganizationId, Id = x.DepartmentId }).OnDelete(DeleteBehavior.Restrict);
         model.Entity<Invitation>().HasIndex(x => x.TokenHash).IsUnique();
         model.Entity<Invitation>().HasIndex(x => new { x.OrganizationId, x.ExpiresAt });
         model.Entity<Invitation>().HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId);
@@ -32,6 +43,7 @@ internal sealed class FlowOpsDb(DbContextOptions<FlowOpsDb> options) : DbContext
         model.Entity<OrganizationEvent>().HasIndex(x => new { x.OrganizationId, x.At });
         model.Entity<Purchase>().HasKey(x => new { x.OrganizationId, x.Id });
         model.Entity<Purchase>().HasIndex(x => new { x.OrganizationId, x.Requester, x.CreatedAt });
+        model.Entity<Purchase>().HasIndex(x => new { x.OrganizationId, x.CreatedAt });
         model.Entity<Purchase>().HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId);
         model.Entity<Purchase>().Property(x => x.Amount).HasPrecision(14, 2);
         model.Entity<PurchaseWorkflowDefinition>().HasKey(x => new { x.OrganizationId, x.Id });
@@ -47,14 +59,37 @@ internal sealed class FlowOpsDb(DbContextOptions<FlowOpsDb> options) : DbContext
         model.Entity<Approval>().HasKey(x => new { x.OrganizationId, x.PurchaseId, x.Stage });
         model.Entity<Approval>().HasOne<Purchase>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.PurchaseId });
         model.Entity<Approval>().HasIndex(x => new { x.OrganizationId, x.Assignee, x.Decision });
+        model.Entity<Approval>().HasIndex(x => new { x.OrganizationId, x.Assignee, x.Decision, x.DueAt });
         model.Entity<Approval>().Property(x => x.Decision).IsConcurrencyToken();
+        model.Entity<Approval>().Property(x => x.Assignee).IsConcurrencyToken();
+        model.Entity<Approval>().HasIndex(x => x.DueAt).HasFilter("\"Decision\" IS NULL AND \"EscalatedAt\" IS NULL");
+        model.Entity<ApprovalAssignment>().HasOne<Approval>().WithMany()
+            .HasForeignKey(x => new { x.OrganizationId, x.PurchaseId, x.Stage });
+        model.Entity<ApprovalAssignment>().HasIndex(x => new { x.OrganizationId, x.PurchaseId, x.Stage, x.At });
         model.Entity<AuditEvent>().HasOne<Purchase>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.PurchaseId });
         model.Entity<AuditEvent>().HasIndex(x => new { x.OrganizationId, x.PurchaseId, x.At });
+        model.Entity<AuditEvent>().HasIndex(x => new { x.OrganizationId, x.At });
         model.Entity<Notification>().HasOne<Purchase>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.PurchaseId });
         model.Entity<Notification>().HasIndex(x => new { x.OrganizationId, x.Recipient, x.CreatedAt });
+        model.Entity<NotificationDelivery>().HasKey(x => new { x.NotificationId, x.Channel });
+        model.Entity<NotificationDelivery>().HasOne<Notification>().WithMany().HasForeignKey(x => x.NotificationId);
+        model.Entity<NotificationDelivery>().HasIndex(x => new { x.Channel, x.NextAttemptAt }).HasFilter("\"CompletedAt\" IS NULL");
         model.Entity<WorkflowCommand>().HasOne<Purchase>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.PurchaseId });
         model.Entity<WorkflowCommand>().HasIndex(x => new { x.OrganizationId, x.PurchaseId, x.Stage }).IsUnique();
         model.Entity<WorkflowCommand>().HasIndex(x => new { x.CompletedAt, x.NextAttemptAt });
+    }
+
+    public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    {
+        var notifications = ChangeTracker.Entries<Notification>().Where(x => x.State == EntityState.Added)
+            .Select(x => x.Entity.Id).ToArray();
+        foreach (var id in notifications)
+        {
+            foreach (var channel in NotificationDispatcher.Channels)
+                if (NotificationDeliveries.Local.All(x => x.NotificationId != id || x.Channel != channel))
+                    NotificationDeliveries.Add(new NotificationDelivery { NotificationId = id, Channel = channel });
+        }
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
 }
 
@@ -66,6 +101,8 @@ internal sealed class Organization
     public decimal FinanceThreshold { get; set; } = 5000;
     public string? FinanceApprover { get; set; }
     public string Currency { get; init; } = "USD";
+    public bool WebhookEnabled { get; set; }
+    public string Plan { get; set; } = "starter";
 }
 
 internal sealed class Membership
@@ -74,7 +111,18 @@ internal sealed class Membership
     public required string Subject { get; init; }
     public required string Role { get; set; }
     public string? Manager { get; set; }
+    public Guid? TeamId { get; set; }
+    public Guid? DepartmentId { get; set; }
     public string? Email { get; init; }
+}
+
+internal sealed class OrganizationGroup
+{
+    public Guid OrganizationId { get; init; }
+    public Guid Id { get; init; } = Guid.NewGuid();
+    public required string Kind { get; init; }
+    public required string Name { get; set; }
+    public string? Lead { get; set; }
 }
 
 internal sealed class Invitation
@@ -110,6 +158,7 @@ internal sealed class Purchase
     public required string Category { get; init; }
     public required string Currency { get; init; }
     public decimal Amount { get; init; }
+    public string Priority { get; init; } = "normal";
     public required string Manager { get; init; }
     public string? Finance { get; init; }
     public Guid? WorkflowId { get; init; }
@@ -123,11 +172,24 @@ internal sealed class Approval
     public Guid OrganizationId { get; init; }
     public Guid PurchaseId { get; init; }
     public int Stage { get; init; }
-    public required string Assignee { get; init; }
+    public required string Assignee { get; set; }
     public required string BookmarkId { get; init; }
+    public DateTimeOffset DueAt { get; set; }
+    public DateTimeOffset? EscalatedAt { get; set; }
     public string? Decision { get; set; }
     public string? Comment { get; set; }
     public DateTimeOffset? DecidedAt { get; set; }
+}
+
+internal sealed class ApprovalAssignment
+{
+    public Guid Id { get; init; } = Guid.NewGuid();
+    public Guid OrganizationId { get; init; }
+    public Guid PurchaseId { get; init; }
+    public int Stage { get; init; }
+    public required string Assignee { get; init; }
+    public required string Actor { get; init; }
+    public DateTimeOffset At { get; init; } = DateTimeOffset.UtcNow;
 }
 
 internal sealed class AuditEvent
@@ -150,6 +212,15 @@ internal sealed class Notification
     public required string Kind { get; init; }
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? ReadAt { get; set; }
+}
+
+internal sealed class NotificationDelivery
+{
+    public Guid NotificationId { get; init; }
+    public required string Channel { get; init; }
+    public DateTimeOffset NextAttemptAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? CompletedAt { get; set; }
+    public int Attempts { get; set; }
 }
 
 internal sealed class WorkflowCommand

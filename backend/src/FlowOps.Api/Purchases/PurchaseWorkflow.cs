@@ -148,11 +148,13 @@ internal sealed class PurchaseWorkflowWorker(IServiceScopeFactory scopes, ILogge
             var stage = int.Parse(bookmark.Metadata!["flowopsStage"]);
             if (stage <= command.Stage) throw new InvalidOperationException("Elsa did not consume the approval bookmark.");
             var assignee = stage == 1 ? purchase.Manager : purchase.Finance!;
-            db.Approvals.Add(new Approval
+            var approval = new Approval
             {
                 OrganizationId = purchase.OrganizationId, PurchaseId = purchase.Id,
-                Stage = stage, Assignee = assignee, BookmarkId = bookmark.Id
-            });
+                Stage = stage, Assignee = assignee, BookmarkId = bookmark.Id, DueAt = DateTimeOffset.UtcNow.AddHours(48)
+            };
+            db.Approvals.Add(approval);
+            ApprovalAssignments.Record(db, approval, "system");
             purchase.Status = stage == 1 ? "managerReview" : "financeReview";
             db.Notifications.Add(new Notification
             {

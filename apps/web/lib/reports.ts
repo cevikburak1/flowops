@@ -1,0 +1,61 @@
+import type { Locale } from "./messages";
+
+const en = {
+  title: "Operations report", platform: "Platform administration", period: "Reporting period",
+  days: "days", apply: "Apply", purchaseStatus: "Purchases by status", status: "Status", count: "Requests",
+  amount: "Total amount", noPurchases: "No purchases were submitted in this period.",
+  overdue: "Overdue approvals", members: "Members", workflows: "Workflows", plan: "Plan",
+  activity: "Audit log", time: "Time", actor: "Actor", action: "Action", target: "Target",
+  noActivity: "No audit events in this period.", deliveries: "Delivery retries", channel: "Channel",
+  queued: "Waiting", nextAttempt: "Next attempt", noRetries: "No deliveries are waiting to retry.",
+  organizations: "Organizations", starter: "Starter", business: "Business", enterprise: "Enterprise",
+  savePlan: "Save plan", organization: "Organization", realtime: "Live updates",
+  rabbitmq: "RabbitMQ", email: "Email", webhook: "Webhook", system: "System",
+  invited: "Invitation created", invitationRevoked: "Invitation revoked", invitationAccepted: "Invitation accepted",
+  memberUpdated: "Member updated", routingUpdated: "Routing updated", groupCreated: "Group created",
+  groupUpdated: "Group updated", webhookEnabled: "Webhook enabled", webhookDisabled: "Webhook disabled",
+  planChanged: "Plan changed", noOrganizations: "No organizations on this page.",
+};
+
+const tr: typeof en = {
+  title: "Operasyon raporu", platform: "Platform yönetimi", period: "Rapor dönemi",
+  days: "gün", apply: "Uygula", purchaseStatus: "Duruma göre satın alma talepleri", status: "Durum", count: "Talepler",
+  amount: "Toplam tutar", noPurchases: "Bu dönemde satın alma talebi gönderilmedi.",
+  overdue: "Geciken onaylar", members: "Üyeler", workflows: "İş akışları", plan: "Plan",
+  activity: "Denetim kaydı", time: "Zaman", actor: "İşlemi yapan", action: "İşlem", target: "Hedef",
+  noActivity: "Bu dönemde denetim kaydı yok.", deliveries: "Teslimat denemeleri", channel: "Kanal",
+  queued: "Bekleyen", nextAttempt: "Sonraki deneme", noRetries: "Yeniden denenmeyi bekleyen teslimat yok.",
+  organizations: "Kuruluşlar", starter: "Başlangıç", business: "İşletme", enterprise: "Kurumsal",
+  savePlan: "Planı kaydet", organization: "Kuruluş", realtime: "Canlı güncellemeler",
+  rabbitmq: "RabbitMQ", email: "E-posta", webhook: "Webhook", system: "Sistem",
+  invited: "Davet oluşturuldu", invitationRevoked: "Davet iptal edildi", invitationAccepted: "Davet kabul edildi",
+  memberUpdated: "Üye güncellendi", routingUpdated: "Yönlendirme güncellendi", groupCreated: "Grup oluşturuldu",
+  groupUpdated: "Grup güncellendi", webhookEnabled: "Webhook açıldı", webhookDisabled: "Webhook kapatıldı",
+  planChanged: "Plan değiştirildi", noOrganizations: "Bu sayfada kuruluş yok.",
+};
+
+export const reportText = { en, tr };
+export const plans = ["starter", "business", "enterprise"] as const;
+export type Plan = typeof plans[number];
+export type DeliveryChannel = "realtime" | "rabbitmq" | "email" | "webhook";
+export function reportLabel(locale: Locale, value: string) {
+  const t = reportText[locale];
+  return Object.hasOwn(t, value) ? t[value as keyof typeof t] : value;
+}
+
+export interface Report {
+  days: number;
+  statuses: { status: string; count: number; amount: number }[];
+  overdue: number;
+  members: number;
+  workflows: number;
+  plan: Plan;
+  audit: { id: string; actor: string; action: string; target: string | null; at: string }[];
+  deliveries: { channel: DeliveryChannel; count: number; nextAttemptAt: string }[];
+}
+
+export interface PlatformOrganizations {
+  items: { id: string; name: string; slug: string; plan: Plan; members: number; workflows: number }[];
+  page: number;
+  hasMore: boolean;
+}

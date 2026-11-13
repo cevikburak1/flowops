@@ -9,7 +9,9 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
@@ -28,6 +30,11 @@ if (!development && (webOrigin.Scheme != "https" || new Uri(authority).Scheme !=
     throw new InvalidOperationException("Production authentication requires HTTPS.");
 var secret = builder.Configuration["Auth:ClientSecret"]
     ?? throw new InvalidOperationException("Auth:ClientSecret is required.");
+var keys = builder.Configuration["Auth:DataProtectionKeyPath"];
+if (!development && (string.IsNullOrWhiteSpace(keys) || !Path.IsPathFullyQualified(keys) || !Directory.Exists(keys)))
+    throw new InvalidOperationException("Mount an existing absolute Auth:DataProtectionKeyPath in production.");
+if (!string.IsNullOrWhiteSpace(keys))
+    builder.Services.AddDataProtection().SetApplicationName("FlowOps").PersistKeysToFileSystem(new DirectoryInfo(keys));
 
 builder.Services.AddDbContext<FlowOpsDb>(options => options.UseNpgsql(connection, postgres =>
     postgres.MigrationsHistoryTable("__EFMigrationsHistory", "flowops")));
@@ -38,12 +45,19 @@ builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
     options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
-        RateLimitPartition.GetFixedWindowLimiter(context.User.FindFirstValue("sub") ??
-            context.Connection.RemoteIpAddress?.ToString() ?? "anonymous",
-            _ => new FixedWindowRateLimiterOptions { PermitLimit = 240, Window = TimeSpan.FromMinutes(1) }));
+    {
+        var caller = context.User.FindFirstValue("sub") ?? context.Connection.RemoteIpAddress?.ToString() ?? "anonymous";
+        var hubRequest = context.Request.Path.Value?.Contains("/notifications/hub", StringComparison.Ordinal) == true;
+        return RateLimitPartition.GetFixedWindowLimiter(hubRequest ? $"hub:{caller}" : $"http:{caller}",
+            _ => new FixedWindowRateLimiterOptions { PermitLimit = 240, Window = TimeSpan.FromMinutes(1) });
+    });
 });
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
-    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor);
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    if (builder.Configuration["Auth:TrustedProxy"] is { Length: > 0 } proxy)
+        options.KnownProxies.Add(System.Net.IPAddress.Parse(proxy));
+});
 builder.Services.AddAuthentication(options =>
 {
     options.DefaultScheme = "FlowOpsSession";
@@ -102,6 +116,15 @@ builder.Services.AddAuthentication(options =>
     options.TokenValidationParameters = new TokenValidationParameters { ClockSkew = TimeSpan.FromSeconds(30) };
 });
 builder.Services.AddAuthorization();
+builder.Services.AddSignalR();
+builder.Services.AddSingleton<IUserIdProvider, KeycloakUserIdProvider>();
+builder.Services.AddHttpClient("flowops-webhook").ConfigurePrimaryHttpMessageHandler(() =>
+    new SocketsHttpHandler { AllowAutoRedirect = false });
+if (builder.Configuration["Integrations:Webhook:Url"] is { Length: > 0 } webhook &&
+    (!Uri.TryCreate(webhook, UriKind.Absolute, out var endpoint) ||
+        (endpoint.Scheme != "https" && (!development || endpoint.Scheme != "http")) ||
+        string.IsNullOrWhiteSpace(builder.Configuration["Integrations:Webhook:Key"])))
+    throw new InvalidOperationException("The operator webhook requires a valid URL and authentication key.");
 builder.Services.AddElsa(elsa =>
 {
     elsa.UseWorkflowManagement(management => management.UseEntityFrameworkCore(ef =>
@@ -114,6 +137,8 @@ builder.Services.AddElsa(elsa =>
     elsa.AddWorkflow<PurchaseApprovalWorkflow>();
 });
 builder.Services.AddHostedService<PurchaseWorkflowWorker>();
+builder.Services.AddHostedService<ApprovalAssignments>();
+builder.Services.AddHostedService<NotificationDispatcher>();
 
 var app = builder.Build();
 app.UseExceptionHandler();
@@ -121,6 +146,7 @@ app.UseForwardedHeaders();
 app.Use(async (context, next) =>
 {
     var path = context.Request.Path;
+    context.Response.Headers.XContentTypeOptions = "nosniff";
     var isApplicationWrite = !HttpMethods.IsGet(context.Request.Method) && !HttpMethods.IsHead(context.Request.Method) &&
         (path.StartsWithSegments("/api") || path == "/auth/logout");
     if (isApplicationWrite && (context.Request.Cookies.ContainsKey("flowops.session") ||
@@ -156,6 +182,8 @@ app.MapHealthChecks("/health/ready");
 app.MapGet("/health/live", () => Results.Ok());
 if (development) app.MapOpenApi();
 app.MapFlowOps();
+app.MapHub<NotificationHub>("/api/notifications/hub", options =>
+    options.CloseOnAuthenticationExpiration = true).RequireAuthorization();
 
 await using (var scope = app.Services.CreateAsyncScope())
 {

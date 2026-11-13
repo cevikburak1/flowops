@@ -17,6 +17,15 @@ const en = {
   invalidFinance: "Choose a member with the Approver role.", invalidThreshold: "Enter a valid threshold.",
   invalidRole: "Choose a permitted role.", invalidEmail: "Enter a valid email address.", alreadyMember: "This email is already a member.",
   alreadyAccepted: "This invitation was already accepted.", member: "Member",
+  groups: "Teams and departments", team: "Team", department: "Department", groupName: "Name",
+  groupLead: "Approval lead", addGroup: "Add group", noGroup: "Unassigned",
+  invalidGroup: "Choose a group type and enter a name between 2 and 80 characters.",
+  groupExists: "A group of this type already has that name.",
+  assign: "Reassign approval", invalidAssignee: "Choose an eligible approver for this stage.",
+  assignmentChanged: "This approval changed. Refresh and check its current assignee.",
+  assignmentHistory: "Assignment history", system: "System",
+  integrations: "Integrations", webhook: "Send notification events to the configured webhook",
+  webhookUnavailable: "The operator has yet to configure a webhook.",
   OrganizationOwner: "Owner", OrganizationAdmin: "Administrator", Manager: "Manager",
   Approver: "Approver", Employee: "Employee", Viewer: "Viewer",
 };
@@ -38,6 +47,15 @@ const tr: typeof en = {
   invalidFinance: "Onaylayıcı rolüne sahip bir üye seçin.", invalidThreshold: "Geçerli bir eşik girin.",
   invalidRole: "İzin verilen bir rol seçin.", invalidEmail: "Geçerli bir e-posta adresi girin.", alreadyMember: "Bu e-posta zaten bir üyeye ait.",
   alreadyAccepted: "Bu davet zaten kabul edildi.", member: "Üye",
+  groups: "Ekipler ve departmanlar", team: "Ekip", department: "Departman", groupName: "Ad",
+  groupLead: "Onay sorumlusu", addGroup: "Grup ekle", noGroup: "Atanmamış",
+  invalidGroup: "Grup türünü seçin ve 2 ile 80 karakter arasında bir ad girin.",
+  groupExists: "Bu türde aynı ada sahip bir grup var.",
+  assign: "Onayı yeniden ata", invalidAssignee: "Bu adım için uygun bir onaylayıcı seçin.",
+  assignmentChanged: "Bu onay değişti. Sayfayı yenileyip güncel sorumluyu kontrol edin.",
+  assignmentHistory: "Atama geçmişi", system: "Sistem",
+  integrations: "Entegrasyonlar", webhook: "Bildirim olaylarını yapılandırılmış webhook adresine gönder",
+  webhookUnavailable: "Operatör henüz bir webhook yapılandırmadı.",
   OrganizationOwner: "Kuruluş sahibi", OrganizationAdmin: "Kuruluş yöneticisi", Manager: "Yönetici",
   Approver: "Onaylayıcı", Employee: "Çalışan", Viewer: "İzleyici",
 };
@@ -51,11 +69,15 @@ export function organizationError(locale: Locale, code: string) {
 }
 export const canManageOrganization = (role?: string) => role === "OrganizationOwner" || role === "OrganizationAdmin";
 
-export interface Member { subject: string; email: string | null; role: Role; manager: string | null }
+export interface Member { subject: string; email: string | null; role: Role; manager: string | null; teamId: string | null; departmentId: string | null }
+export interface OrganizationGroup { id: string; kind: "team" | "department"; name: string; lead: string | null }
 export interface OrganizationSettings {
   members: Member[];
+  groups: OrganizationGroup[];
   invitations: { id: string; email: string; role: Role; expiresAt: string }[];
   financeThreshold: number;
   financeApprover: string | null;
   canAssignAdmin: boolean;
+  webhookAvailable: boolean;
+  webhookEnabled: boolean;
 }

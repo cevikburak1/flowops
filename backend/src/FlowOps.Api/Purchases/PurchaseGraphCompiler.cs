@@ -88,10 +88,15 @@ public sealed class NotifyPurchaseRequester : Activity
         var db = scope.ServiceProvider.GetRequiredService<FlowOpsDb>();
         var key = new Guid(SHA256.HashData(Encoding.UTF8.GetBytes($"purchase-notice:{org:N}:{id:N}")).AsSpan(0, 16));
         await db.Database.ExecuteSqlInterpolatedAsync($"""
-            INSERT INTO flowops."Notifications" ("Id", "OrganizationId", "PurchaseId", "Recipient", "Kind", "CreatedAt")
-            SELECT {key}, "OrganizationId", "Id", "Requester", 'workflowNotice', now()
-            FROM flowops."Purchases" WHERE "OrganizationId" = {org} AND "Id" = {id}
-            ON CONFLICT ("Id") DO NOTHING
+            WITH inserted AS (
+                INSERT INTO flowops."Notifications" ("Id", "OrganizationId", "PurchaseId", "Recipient", "Kind", "CreatedAt")
+                SELECT {key}, "OrganizationId", "Id", "Requester", 'workflowNotice', now()
+                FROM flowops."Purchases" WHERE "OrganizationId" = {org} AND "Id" = {id}
+                ON CONFLICT ("Id") DO NOTHING
+                RETURNING "Id"
+            )
+            INSERT INTO flowops."NotificationDeliveries" ("NotificationId", "Channel", "NextAttemptAt", "Attempts")
+            SELECT "Id", channel, now(), 0 FROM inserted CROSS JOIN unnest({NotificationDispatcher.Channels}) AS channel
             """, context.CancellationToken);
         await context.CompleteActivityAsync();
     }

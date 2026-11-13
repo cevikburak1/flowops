@@ -17,10 +17,10 @@ internal static class DevelopmentSeed
             new Organization { Id = studio, Name = "Northstar Operations", Slug = "northstar" },
             new Organization { Id = lab, Name = "Juniper Labs", Slug = "juniper" });
         db.Memberships.AddRange(
-            new Membership { OrganizationId = studio, Subject = Employee, Role = "Employee", Manager = Manager },
-            new Membership { OrganizationId = studio, Subject = Manager, Role = "Manager" },
-            new Membership { OrganizationId = studio, Subject = Finance, Role = "Approver" },
-            new Membership { OrganizationId = lab, Subject = Finance, Role = "OrganizationOwner" });
+            new Membership { OrganizationId = studio, Subject = Employee, Role = "Employee", Manager = Manager, Email = "employee@example.test" },
+            new Membership { OrganizationId = studio, Subject = Manager, Role = "Manager", Email = "manager@example.test" },
+            new Membership { OrganizationId = studio, Subject = Finance, Role = "Approver", Email = "finance@example.test" },
+            new Membership { OrganizationId = lab, Subject = Finance, Role = "OrganizationOwner", Email = "finance@example.test" });
         await db.SaveChangesAsync();
     }
 }

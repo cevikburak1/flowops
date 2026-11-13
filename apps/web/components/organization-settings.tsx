@@ -3,8 +3,9 @@
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "./ui/button";
-import { organizationError, organizationText, roles, type Member, type OrganizationSettings } from "../lib/organization";
+import { organizationError, organizationText, roles, type Member, type OrganizationSettings, type OrganizationGroup } from "../lib/organization";
 import type { Locale } from "../lib/messages";
+import { plans, reportText, type Plan } from "../lib/reports";
 
 async function post(path: string, data: object) {
   const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
@@ -48,6 +49,56 @@ function SettingsForm({ locale, action, children, submit }: {
 
 function memberLabel(member: Member) { return member.email ?? member.subject; }
 
+function GroupForm({ group, managers, base, locale }: {
+  group?: OrganizationGroup; managers: Member[]; base: string; locale: Locale;
+}) {
+  const router = useRouter();
+  const t = organizationText[locale];
+  return <SettingsForm locale={locale} submit={group ? t.save : t.addGroup} action={async fields => {
+    await post(group ? `${base}/groups/${group.id}` : `${base}/groups`, {
+      kind: group?.kind ?? fields.get("kind"), name: fields.get("name"), lead: fields.get("lead"),
+    });
+    router.refresh();
+  }}>
+    {!group && <label>{t.role}<select name="kind"><option value="team">{t.team}</option>
+      <option value="department">{t.department}</option></select></label>}
+    <label>{t.groupName}<input name="name" required minLength={2} maxLength={80} defaultValue={group?.name} /></label>
+    <label>{t.groupLead}<select name="lead" defaultValue={group?.lead ?? ""}>
+      <option value="">{t.noManager}</option>
+      {managers.map(manager => <option key={manager.subject} value={manager.subject}>{memberLabel(manager)}</option>)}
+    </select></label>
+  </SettingsForm>;
+}
+
+export function ReassignApproval({ locale, path, current, members }: {
+  locale: Locale; path: string; current: string; members: Pick<Member, "subject" | "email">[];
+}) {
+  const router = useRouter();
+  const t = organizationText[locale];
+  return <SettingsForm locale={locale} submit={t.assign} action={async fields => {
+    await post(path, { assignee: fields.get("assignee"), expectedAssignee: current });
+    router.refresh();
+  }}>
+    <label>{t.assign}<select name="assignee" required defaultValue="">
+      <option value="" disabled>{t.noManager}</option>
+      {members.map(member => <option key={member.subject} value={member.subject}>{member.email ?? member.subject}</option>)}
+    </select></label>
+  </SettingsForm>;
+}
+
+export function ChangePlan({ locale, id, name, plan }: { locale: Locale; id: string; name: string; plan: Plan }) {
+  const t = reportText[locale];
+  const router = useRouter();
+  return <SettingsForm locale={locale} submit={t.savePlan} action={async fields => {
+    await post(`/api/platform/organizations/${id}/plan`, { plan: fields.get("plan") });
+    router.refresh();
+  }}>
+    <select aria-label={`${t.plan} / ${name}`} name="plan" defaultValue={plan}>
+      {plans.map(option => <option key={option} value={option}>{t[option]}</option>)}
+    </select>
+  </SettingsForm>;
+}
+
 export function Settings({ data, base, currency, locale }: {
   data: OrganizationSettings; base: string; currency: string; locale: Locale;
 }) {
@@ -74,6 +125,7 @@ export function Settings({ data, base, currency, locale }: {
                 <SettingsForm locale={locale} action={async fields => {
                   await post(`${base}/members/${encodeURIComponent(member.subject)}/settings`, {
                     role: fields.get("role") ?? member.role, manager: fields.get("manager"),
+                    groups: { teamId: fields.get("team") || null, departmentId: fields.get("department") || null },
                   });
                   router.refresh();
                 }}>
@@ -87,6 +139,15 @@ export function Settings({ data, base, currency, locale }: {
                       {managers.filter(manager => manager.subject !== member.subject).map(manager =>
                         <option key={manager.subject} value={manager.subject}>{memberLabel(manager)}</option>)}
                     </select></label>
+                  </div>
+                  <div className="form-row">
+                    {(["team", "department"] as const).map(kind => <label key={kind}>{t[kind]}
+                      <select name={kind} defaultValue={(kind === "team" ? member.teamId : member.departmentId) ?? ""}>
+                        <option value="">{t.noGroup}</option>
+                        {data.groups.filter(group => group.kind === kind).map(group =>
+                          <option key={group.id} value={group.id}>{group.name}</option>)}
+                      </select>
+                    </label>)}
                   </div>
                 </SettingsForm>
               </details>
@@ -111,6 +172,23 @@ export function Settings({ data, base, currency, locale }: {
       </section>
     </div>
     <div className="detail-main">
+      <section className="panel detail-panel settings-panel">
+        <h2>{t.integrations}</h2>
+        {data.webhookAvailable || data.webhookEnabled ? <SettingsForm locale={locale} action={async fields => {
+          await post(`${base}/integrations/webhook`, { enabled: fields.get("enabled") === "on" });
+          router.refresh();
+        }}>
+          <label><span>{t.webhook}</span><input className="w-auto" type="checkbox" name="enabled" defaultChecked={data.webhookEnabled} /></label>
+        </SettingsForm> : <p className="muted">{t.webhookUnavailable}</p>}
+      </section>
+      <section className="panel detail-panel settings-panel">
+        <h2>{t.groups}</h2>
+        {data.groups.map(group => <details key={group.id} className="member-details">
+          <summary><span>{group.name}</span><span className="status">{t[group.kind]}</span></summary>
+          <GroupForm group={group} base={base} managers={managers} locale={locale} />
+        </details>)}
+        <GroupForm base={base} managers={managers} locale={locale} />
+      </section>
       <section className="panel detail-panel settings-panel">
         <h2>{t.invite}</h2>
         <p className="muted">{t.inviteHint}</p>

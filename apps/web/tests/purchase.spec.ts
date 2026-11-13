@@ -47,6 +47,7 @@ test("a persisted purchase reaches manager and finance before completion", async
   await employee.getByLabel("Purchase title").fill(title);
   await employee.getByLabel(/Amount/).fill("6400");
   await employee.getByLabel("Category").selectOption("equipment");
+  await employee.locator("select[name=priority]").selectOption("high");
   await employee.getByLabel("Business reason").fill("Replace the inspection equipment used by field staff.");
   await employee.getByRole("button", { name: "Submit request" }).click();
   await expect(employee.getByRole("heading", { name: title })).toBeVisible();
@@ -61,7 +62,25 @@ test("a persisted purchase reaches manager and finance before completion", async
     const response = await manager.request.get(`${organizationApi}/workspace`);
     return (await response.json()).approvals.some((item: { id: string }) => item.id === purchaseId);
   }).toBe(true);
-  await manager.goto(`${workspace}?view=approvals`);
+  const queue = `${organizationApi}/tasks`;
+  const assigned = await (await manager.request.get(`${queue}?status=pending&priority=high`)).json();
+  const task = assigned.items.find((item: { id: string }) => item.id === purchaseId);
+  expect(task).toMatchObject({ stage: 1, priority: "high", overdue: false });
+  expect(Date.parse(task.dueAt) - Date.now()).toBeGreaterThan(47 * 60 * 60 * 1000);
+  const other = await (await employee.request.get(`${queue}?priority=high`)).json();
+  expect(other.items.some((item: { id: string }) => item.id === purchaseId)).toBe(false);
+  expect((await manager.request.get("/api/organizations/17213e02-c104-49cf-93b5-a625628e5906/tasks")).status()).toBe(404);
+  await manager.getByRole("link", { name: "My tasks" }).click();
+  for (const width of [1440, 1024, 768, 390]) {
+    await manager.setViewportSize({ width, height: 900 });
+    expect(await manager.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+  }
+  await manager.locator("select[name=priority]").selectOption("low");
+  await manager.getByRole("button", { name: "Apply filters" }).click();
+  await expect(manager).toHaveURL(/priority=low/);
+  await expect(manager.getByRole("link", { name: title })).toHaveCount(0);
+  await manager.locator("select[name=priority]").selectOption("high");
+  await manager.getByRole("button", { name: "Apply filters" }).click();
   await manager.getByRole("link", { name: title }).click();
   await manager.getByRole("button", { name: "Approve", exact: true }).click();
   const beforeConfirmation = await manager.request.get(`${organizationApi}/purchases/${purchaseId}`);
@@ -71,6 +90,8 @@ test("a persisted purchase reaches manager and finance before completion", async
     const response = await employee.request.get(`${organizationApi}/purchases/${purchaseId}`);
     return (await response.json()).status;
   }).toBe("financeReview");
+  await manager.goto(`${workspace}/tasks?status=completed&priority=high`);
+  await expect(manager.getByRole("row").filter({ hasText: title }).getByText("Approved")).toBeVisible();
   expect((await manager.request.post(approval, { headers: { origin }, data: { decision: "rejected" } })).status()).toBe(409);
   expect((await manager.request.post(approval, { headers: { origin: "https://example.test" }, data: { decision: "approved" } })).status()).toBe(403);
 
@@ -78,16 +99,20 @@ test("a persisted purchase reaches manager and finance before completion", async
   await finance.goto(`${workspace}?view=approvals`);
   await finance.getByRole("link", { name: title }).click();
   await finance.getByRole("button", { name: "Approve", exact: true }).click();
+  const subscribed = employee.waitForResponse(response => response.url().includes("/notifications/hub") &&
+    response.request().method() === "POST" && response.request().postData()?.includes('"protocol":"json"') && response.ok());
+  await employee.goto(`${workspace}?view=notifications`);
+  await subscribed;
   await finance.getByRole("button", { name: /Confirm decision.*Approve/ }).click();
   await expect.poll(async () => {
     const response = await employee.request.get(`${organizationApi}/purchases/${purchaseId}`);
     return (await response.json()).status;
   }).toBe("approved");
-  await employee.reload();
+  const notification = employee.getByRole("listitem").filter({ has: employee.getByRole("link", { name: title }) });
+  await expect(notification.getByText(/Approved/)).toBeVisible({ timeout: 12000 });
+  await notification.getByRole("link", { name: title }).click();
   await expect(employee.getByText("Finance approved", { exact: true })).toBeVisible();
   await employee.goto(`${workspace}?view=notifications`);
-  const notification = employee.getByRole("listitem").filter({ has: employee.getByRole("link", { name: title }) });
-  await expect(notification.getByText(/Approved/)).toBeVisible();
   await notification.getByRole("button", { name: "Mark as read" }).click();
   await expect.poll(async () => {
     const response = await employee.request.get(`${organizationApi}/workspace`);
@@ -140,6 +165,7 @@ test("one competing approval wins and rejection skips finance", async ({ browser
 });
 
 test("a new organization configures routing and runs an immutable published workflow", async ({ browser, page: owner }) => {
+  test.setTimeout(150000);
   const manager = await browser.newPage();
   const employee = await browser.newPage();
   await login(owner, "finance");
@@ -199,9 +225,14 @@ test("a new organization configures routing and runs an immutable published work
   await managerRow.getByLabel("Role").selectOption("Manager");
   await managerRow.getByRole("button", { name: "Save" }).click();
   await expect(managerRow.getByText("Saved", { exact: true })).toBeVisible();
+  const groups = owner.getByRole("heading", { name: "Teams and departments" }).locator("..");
+  await groups.getByLabel("Name", { exact: true }).fill("Procurement operations");
+  await groups.getByLabel("Approval lead").selectOption({ label: "manager@example.test" });
+  await groups.getByRole("button", { name: "Add group" }).click();
+  await expect(groups.getByText("Procurement operations", { exact: true })).toBeVisible();
   const employeeRow = owner.locator(".member-details").filter({ hasText: "employee@example.test" });
   await employeeRow.locator("summary").click();
-  await employeeRow.locator("select[name=manager]").selectOption({ label: "manager@example.test" });
+  await employeeRow.locator("select[name=team]").selectOption({ label: "Procurement operations" });
   await employeeRow.getByRole("button", { name: "Save" }).click();
   await expect(employeeRow.getByText("Saved", { exact: true })).toBeVisible();
   const routing = owner.getByRole("heading", { name: "Purchase routing" }).locator("..");
@@ -217,6 +248,22 @@ test("a new organization configures routing and runs an immutable published work
   const organizationSettings = await (await owner.request.get(`${base}/settings`)).json();
   expect(organizationSettings.invitations).toHaveLength(0);
   expect(organizationSettings.financeThreshold).toBe(1000);
+  expect((await employee.request.get(`${base}/reports`)).status()).toBe(404);
+  expect((await employee.request.get("/api/platform/organizations")).status()).toBe(404);
+  expect((await owner.request.get(`${organizationApi}/reports`)).status()).toBe(404);
+  await owner.goto(`/workspace/${id}/reports?days=7`);
+  await expect(owner.getByRole("heading", { name: "Operations report" })).toBeVisible();
+  await expect(owner.getByText("Group created", { exact: true })).toBeVisible();
+  for (const width of [1440, 1024, 768, 390]) {
+    await owner.setViewportSize({ width, height: 900 });
+    expect(await owner.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+  }
+  expect((await new AxeBuilder({ page: owner }).withTags(["wcag2a", "wcag2aa"]).analyze()).violations).toEqual([]);
+  await owner.getByRole("button", { name: "Switch color theme" }).click();
+  await expect(owner.locator("html")).toHaveAttribute("data-theme", "light");
+  expect((await new AxeBuilder({ page: owner }).withTags(["wcag2a", "wcag2aa"]).analyze()).violations).toEqual([]);
+  await owner.getByRole("link", { name: "90 days" }).click();
+  await expect(owner.getByRole("link", { name: "90 days" })).toHaveAttribute("aria-current", "page");
 
   await owner.goto(`/workspace/${id}/workflows`);
   for (const width of [1440, 1024, 768, 390]) {
@@ -287,7 +334,18 @@ test("a new organization configures routing and runs an immutable published work
   expect((await employee.request.post(`${base}/purchases`, { headers: { origin }, data: input })).status()).toBe(201);
   const detail = `${base}/purchases/${purchaseId}`;
   await expect.poll(async () => (await (await employee.request.get(detail)).json()).status).toBe("managerReview");
-  expect((await manager.request.post(`${detail}/approvals/1`, { headers: { origin }, data: { decision: "approved" } })).status()).toBe(202);
+  const before = await (await owner.request.get(detail)).json();
+  const current = before.stages[0].assignee;
+  const next = before.eligibleMembers.find((member: { role: string }) => member.role === "OrganizationOwner").subject;
+  const assign = `${detail}/approvals/1/assign`;
+  const assignment = { assignee: next, expectedAssignee: current };
+  expect((await manager.request.post(assign, { headers: { origin }, data: assignment })).status()).toBe(404);
+  expect((await owner.request.post(assign, { headers: { origin }, data: assignment })).status()).toBe(204);
+  expect((await owner.request.post(assign, { headers: { origin }, data: assignment })).status()).toBe(204);
+  expect((await manager.request.post(`${detail}/approvals/1`, { headers: { origin }, data: { decision: "approved" } })).status()).toBe(404);
+  const after = await (await owner.request.get(detail)).json();
+  expect(after.assignmentHistory.map((event: { assignee: string }) => event.assignee)).toEqual([current, next]);
+  expect((await owner.request.post(`${detail}/approvals/1`, { headers: { origin }, data: { decision: "approved" } })).status()).toBe(202);
   await expect.poll(async () => (await (await employee.request.get(detail)).json()).status).toBe("approved");
 
   await employee.goto(`/workspace/${id}/workflows`);
@@ -371,6 +429,10 @@ test("a new organization configures routing and runs an immutable published work
   const ownerSubject = members.find((member: { role: string }) => member.role === "OrganizationOwner").subject;
   const employeeSubject = members.find((member: { email: string }) => member.email === "employee@example.test").subject;
   const managerSubject = members.find((member: { email: string }) => member.email === "manager@example.test").subject;
+  const group = organizationSettings.groups.find((item: { name: string }) => item.name === "Procurement operations");
+  expect((await owner.request.post(`${base}/groups/${group.id}`, {
+    headers: { origin }, data: { name: group.name, kind: group.kind, lead: ownerSubject },
+  })).status()).toBe(204);
   for (const [subject, role, assignedManager] of [[employeeSubject, "Employee", ownerSubject], [managerSubject, "Approver", null]]) {
     expect((await owner.request.post(`${base}/members/${subject}/settings`, {
       headers: { origin }, data: { role, manager: assignedManager },
