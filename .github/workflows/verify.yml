@@ -49,5 +49,5 @@ jobs:
           docker build -t flowops-api:ci backend
           docker build -t flowops-web:ci apps/web
       - name: Stop test dependencies
-        if: always()
+        if: always() && hashFiles('.env') != ''
         run: docker compose down

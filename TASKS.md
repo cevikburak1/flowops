@@ -26,7 +26,7 @@
 - [ ] Extend the builder beyond purchase workflows with parallel, timer, webhook, HTTP, form, and assignment nodes.
 - [x] Phase 7 personal approval task list with due dates, purchase priority, and pending, overdue, and completed filters. Verify assignee access and the transition from pending to completed in Playwright.
 - [x] Phase 7 team and department creation and editing, lead-based purchase routing, approval reassignment, assignment history, and overdue notifications.
-- [ ] Verify the timed escalation path with an overdue fixture.
+- [x] Verify the timed escalation path and subsequent approval decision with an overdue fixture.
 - [x] Phase 8 transactional notification outbox, RabbitMQ publisher confirms, optional SMTP and operator webhook, recipient-scoped SignalR updates, and retry counts. Verify local RabbitMQ publication and SMTP delivery to Mailpit.
 - [x] Verify SignalR refreshes the recipient's notifications without a manual page reload.
 - [ ] Verify webhook retries and the n8n receiver end to end.

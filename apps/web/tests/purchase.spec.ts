@@ -100,7 +100,7 @@ test("a persisted purchase reaches manager and finance before completion", async
   await finance.getByRole("link", { name: title }).click();
   await finance.getByRole("button", { name: "Approve", exact: true }).click();
   const subscribed = employee.waitForResponse(response => response.url().includes("/notifications/hub") &&
-    response.request().method() === "POST" && response.request().postData()?.includes('"protocol":"json"') && response.ok());
+    response.request().method() === "POST" && (response.request().postData() ?? "").includes('"protocol":"json"') && response.ok());
   await employee.goto(`${workspace}?view=notifications`);
   await subscribed;
   await finance.getByRole("button", { name: /Confirm decision.*Approve/ }).click();
