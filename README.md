@@ -12,6 +12,52 @@ FlowOps gives requesters a place to submit and track work, reviewers a queue of 
 
 *The dashboard shown above uses synthetic purchase history.*
 
+## Example workflows
+
+| Try it | What happens |
+| --- | --- |
+| [Elsa purchase approval JSON](examples/workflows/elsa/purchase-approval.json) | The manager reviews first. With a USD 5,000 threshold, a USD 4,000 purchase skips finance and a USD 6,000 purchase waits for finance approval. |
+| [Elsa parallel timers JSON](examples/workflows/elsa/parallel-timers.json) | A form starts two timers together. The run completes when both branches finish. |
+| [n8n notification receiver JSON](examples/workflows/n8n/flowops-notification-receiver.json) | An authenticated webhook receives a FlowOps notification and returns its event ID and kind. |
+
+The two Elsa examples are FlowOps drafts. Create and publish them in FlowOps to compile them into Elsa definitions. Import the n8n JSON from the n8n editor, then configure the local webhook credential. [Setup for all three examples](examples/workflows/README.md).
+
+### Purchase approval in Elsa
+
+```mermaid
+flowchart TD
+    Request["Submit purchase"] --> Manager["Manager review"]
+    Manager -->|Approved| Threshold{"USD 5,000 or more?"}
+    Manager -->|Rejected| Rejected["Rejected"]
+    Threshold -->|No| Approved["Approved"]
+    Threshold -->|Yes| Finance["Finance review"]
+    Finance -->|Approved| Approved
+    Finance -->|Rejected| Rejected
+```
+
+### Parallel process in Elsa
+
+```mermaid
+flowchart TD
+    Form["Submit process form"] --> Fork["Start both branches"]
+    Fork --> A["Wait 5 seconds"]
+    Fork --> B["Wait 10 seconds"]
+    A --> Join["Both branches finish"]
+    B --> Join
+    Join --> Complete["Process completed"]
+```
+
+### Notification delivery to n8n
+
+```mermaid
+flowchart LR
+    Event["FlowOps notification"] --> Outbox["Durable outbox"]
+    Outbox -->|"POST with Header Auth"| Hook["n8n webhook"]
+    Hook --> Reply["Return event ID and kind"]
+```
+
+If webhook delivery fails, the FlowOps outbox schedules a retry. The example receiver only acknowledges delivery. The purchase decision and its audit history stay in FlowOps.
+
 ## What you can do
 
 | Area | Capabilities |
@@ -55,34 +101,6 @@ Use `FLOWOPS_DEV_PASSWORD` from your local `.env` for the three development acco
 | `finance` | Complete the finance approval. Switch to **Juniper Labs** to manage workflows and processes or view reports. |
 
 To submit requests in a new organization, assign the requester a manager or a team or department lead. For optional local Mailpit, SeaweedFS, and n8n services, run `./infrastructure/dev.ps1 integrations`. Stop the app terminals with Ctrl+C and the containers with `docker compose --profile integrations stop`.
-
-## Example workflows
-
-[Browse the example files and setup steps](examples/workflows/README.md). FlowOps compiles its workflow drafts to Elsa definitions. The optional n8n workflow receives notification events for integration demos.
-
-```mermaid
-flowchart LR
-    Submit["Submit purchase"] --> Manager["Elsa waits for manager"]
-    Manager -->|Approved| Check{"Finance threshold met?"}
-    Manager -->|Rejected| Rejected["Rejected"]
-    Check -->|No| Approved["Approved"]
-    Check -->|Yes| Finance["Elsa waits for finance"]
-    Finance -->|Approved| Approved
-    Finance -->|Rejected| Rejected
-    Approved --> Outbox["FlowOps notification outbox"]
-    Rejected --> Outbox
-    Outbox -. Optional webhook .-> n8n["n8n acknowledges event"]
-```
-
-```mermaid
-flowchart LR
-    Form["Submit process form"] --> Fork["Elsa starts both branches"]
-    Fork --> A["Timer: 5 seconds"]
-    Fork --> B["Timer: 10 seconds"]
-    A --> Join["Both branches finish"]
-    B --> Join
-    Join --> Complete["Process completed"]
-```
 
 ## Architecture
 
