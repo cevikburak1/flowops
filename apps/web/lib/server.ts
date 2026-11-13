@@ -16,7 +16,7 @@ export interface Workspace {
   approvals: (Purchase & { stage: number })[];
   pendingCount: number;
   statuses: { status: string; count: number }[];
-  notifications: { id: string; purchaseId: string; title: string; kind: string; createdAt: string; readAt: string | null }[];
+  notifications: { id: string; purchaseId: string | null; processId: string | null; processRunId: string | null; title: string; kind: string; createdAt: string; readAt: string | null }[];
   notificationPage: number;
   notificationHasMore: boolean;
   activity: { year: number; month: number; status: string; count: number }[];
@@ -26,15 +26,20 @@ export interface Workspace {
   pageSize: number;
 }
 export interface PurchaseDetail extends Purchase {
+  previousPurchaseId: string | null; revisedPurchaseId: string | null; canResubmit: boolean; canCancel: boolean; workflowId: string | null;
+  workflowDueAt: string | null;
   workflow: { name: string; number: number } | null;
   execution: PurchaseExecutionData | null;
   description: string;
   priority: Priority;
   processing: boolean;
   timeline: { action: string; at: string }[];
-  stages: { stage: number; assignee: string; decision: string | null; comment: string | null; canDecide: boolean; dueAt: string }[];
+  stages: { stage: number; assignee: string; decision: string | null; comment: string | null; canDecide: boolean; dueAt: string; parallel: boolean }[];
+  minimumApprovals: number | null;
+  votes: { subject: string; decision: string | null; decidedAt: string | null; mine: boolean }[];
   assignmentHistory: { stage: number; assignee: string; actor: string; at: string }[];
   eligibleMembers: Pick<Member, "subject" | "email" | "role">[] | null;
+  delegationMembers: Pick<Member, "subject" | "email" | "role">[] | null;
 }
 
 export async function getLocale(): Promise<Locale> {

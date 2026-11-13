@@ -16,6 +16,7 @@ internal sealed class PurchaseWorkflowDefinition
 
 internal sealed class PurchaseWorkflowVersion
 {
+    public string? ApprovalMatrixSnapshot { get; init; }
     public Guid OrganizationId { get; init; }
     public Guid WorkflowId { get; init; }
     public int Number { get; init; }

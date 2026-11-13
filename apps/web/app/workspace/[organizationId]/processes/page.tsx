@@ -20,7 +20,7 @@ export default async function ProcessesPage({ params, searchParams }: {
   const t = processText[locale];
   const creating = view === "new";
   if (creating && !data.canEdit) notFound();
-  return <Shell profile={profile} organization={organization} locale={locale} active="processes">
+  return <Shell profile={profile} organization={organization} locale={locale} active="processes" processEdit={data.canEdit}>
     <header className="page-header">
       <h1>{creating ? t.new : t.title}</h1>
       {creating ? <Link className="button secondary" href={href}>{t.title}</Link> :

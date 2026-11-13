@@ -13,12 +13,19 @@ internal sealed class FlowOpsDb(DbContextOptions<FlowOpsDb> options) : DbContext
     public DbSet<OrganizationEvent> OrganizationEvents => Set<OrganizationEvent>();
     public DbSet<Purchase> Purchases => Set<Purchase>();
     public DbSet<Approval> Approvals => Set<Approval>();
+    public DbSet<ApprovalVote> ApprovalVotes => Set<ApprovalVote>();
+    public DbSet<ApprovalDelegation> ApprovalDelegations => Set<ApprovalDelegation>();
     public DbSet<AuditEvent> Audit => Set<AuditEvent>();
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<NotificationDelivery> NotificationDeliveries => Set<NotificationDelivery>();
     public DbSet<WorkflowCommand> WorkflowCommands => Set<WorkflowCommand>();
     public DbSet<PurchaseWorkflowDefinition> PurchaseWorkflows => Set<PurchaseWorkflowDefinition>();
     public DbSet<PurchaseWorkflowVersion> PurchaseWorkflowVersions => Set<PurchaseWorkflowVersion>();
+    public DbSet<WorkflowSimulationRun> WorkflowSimulationRuns => Set<WorkflowSimulationRun>();
+    public DbSet<WorkflowSimulationScenario> WorkflowSimulationScenarios => Set<WorkflowSimulationScenario>();
+    public DbSet<StudioFormDefinition> StudioForms => Set<StudioFormDefinition>();
+    public DbSet<StudioFormVersion> StudioFormVersions => Set<StudioFormVersion>();
+    public DbSet<StudioSubmissionDraft> StudioSubmissionDrafts => Set<StudioSubmissionDraft>();
     public DbSet<ProcessDefinition> Processes => Set<ProcessDefinition>();
     public DbSet<ProcessRun> ProcessRuns => Set<ProcessRun>();
     public DbSet<ProcessAttachment> ProcessAttachments => Set<ProcessAttachment>();
@@ -27,6 +34,25 @@ internal sealed class FlowOpsDb(DbContextOptions<FlowOpsDb> options) : DbContext
     protected override void OnModelCreating(ModelBuilder model)
     {
         model.HasDefaultSchema("flowops");
+        model.Entity<StudioFormDefinition>().HasKey(x => new { x.OrganizationId, x.Id });
+        model.Entity<StudioFormDefinition>().HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId);
+        model.Entity<StudioFormDefinition>().HasIndex(x => new { x.OrganizationId, x.Name });
+        model.Entity<StudioFormVersion>().HasKey(x => new { x.OrganizationId, x.FormId, x.Number });
+        model.Entity<StudioFormVersion>().HasOne<StudioFormDefinition>().WithMany()
+            .HasForeignKey(x => new { x.OrganizationId, Id = x.FormId });
+        model.Entity<StudioSubmissionDraft>().HasKey(x => new { x.OrganizationId, x.ProcessId, x.Subject, x.ProcessVersion });
+        model.Entity<StudioSubmissionDraft>().HasOne<ProcessDefinition>().WithMany()
+            .HasForeignKey(x => new { x.OrganizationId, Id = x.ProcessId });
+        model.Entity<WorkflowSimulationScenario>().HasKey(x => new { x.OrganizationId, x.WorkflowId, x.Id });
+        model.Entity<WorkflowSimulationRun>().HasKey(x => new { x.OrganizationId, x.WorkflowId, x.Id });
+        model.Entity<WorkflowSimulationScenario>().HasOne<PurchaseWorkflowDefinition>().WithMany()
+            .HasForeignKey(x => new { x.OrganizationId, Id = x.WorkflowId });
+        model.Entity<WorkflowSimulationRun>().HasOne<PurchaseWorkflowDefinition>().WithMany()
+            .HasForeignKey(x => new { x.OrganizationId, Id = x.WorkflowId });
+        model.Entity<WorkflowSimulationRun>().HasOne<WorkflowSimulationScenario>().WithMany()
+            .HasForeignKey(x => new { x.OrganizationId, x.WorkflowId, Id = x.ScenarioId }).OnDelete(DeleteBehavior.NoAction);
+        model.Entity<WorkflowSimulationScenario>().HasIndex(x => new { x.OrganizationId, x.WorkflowId, x.CreatedAt });
+        model.Entity<WorkflowSimulationRun>().HasIndex(x => new { x.OrganizationId, x.WorkflowId, x.CreatedAt });
         model.Entity<ProcessDefinition>().HasKey(x => new { x.OrganizationId, x.Id });
         model.Entity<ProcessDefinition>().HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId);
         model.Entity<ProcessRun>().HasKey(x => new { x.OrganizationId, x.Id });
@@ -76,12 +102,23 @@ internal sealed class FlowOpsDb(DbContextOptions<FlowOpsDb> options) : DbContext
             .HasForeignKey(x => new { x.OrganizationId, x.WorkflowId, x.WorkflowVersion }).OnDelete(DeleteBehavior.Restrict);
         model.Entity<Purchase>().HasIndex(x => new { x.OrganizationId, x.WorkflowId, x.CreatedAt });
         model.Entity<Approval>().HasKey(x => new { x.OrganizationId, x.PurchaseId, x.Stage });
+        model.Entity<Purchase>().HasIndex(x => new { x.OrganizationId, x.PreviousPurchaseId }).IsUnique();
+        model.Entity<Purchase>().HasOne<Purchase>().WithMany().HasForeignKey(x => new { x.OrganizationId, Id = x.PreviousPurchaseId })
+            .OnDelete(DeleteBehavior.Restrict);
+        model.Entity<ApprovalVote>().HasKey(x => new { x.OrganizationId, x.PurchaseId, x.Stage, x.Subject });
+        model.Entity<ApprovalDelegation>().HasKey(x => new { x.OrganizationId, x.Subject });
+        model.Entity<ApprovalDelegation>().HasOne<Membership>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.Subject });
+        model.Entity<ApprovalDelegation>().HasOne<Membership>().WithMany()
+            .HasForeignKey(x => new { x.OrganizationId, Subject = x.Delegate });
+        model.Entity<ApprovalVote>().HasOne<Approval>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.PurchaseId, x.Stage });
+        model.Entity<ApprovalVote>().HasIndex(x => new { x.OrganizationId, x.Subject, x.Decision });
         model.Entity<Approval>().HasOne<Purchase>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.PurchaseId });
         model.Entity<Approval>().HasIndex(x => new { x.OrganizationId, x.Assignee, x.Decision });
         model.Entity<Approval>().HasIndex(x => new { x.OrganizationId, x.Assignee, x.Decision, x.DueAt });
         model.Entity<Approval>().Property(x => x.Decision).IsConcurrencyToken();
         model.Entity<Approval>().Property(x => x.Assignee).IsConcurrencyToken();
         model.Entity<Approval>().HasIndex(x => x.DueAt).HasFilter("\"Decision\" IS NULL AND \"EscalatedAt\" IS NULL");
+        model.Entity<Approval>().HasIndex(x => x.WarnAt).HasFilter("\"Decision\" IS NULL AND \"WarnedAt\" IS NULL AND \"WarnAt\" IS NOT NULL");
         model.Entity<ApprovalAssignment>().HasOne<Approval>().WithMany()
             .HasForeignKey(x => new { x.OrganizationId, x.PurchaseId, x.Stage });
         model.Entity<ApprovalAssignment>().HasIndex(x => new { x.OrganizationId, x.PurchaseId, x.Stage, x.At });
@@ -89,6 +126,8 @@ internal sealed class FlowOpsDb(DbContextOptions<FlowOpsDb> options) : DbContext
         model.Entity<AuditEvent>().HasIndex(x => new { x.OrganizationId, x.PurchaseId, x.At });
         model.Entity<AuditEvent>().HasIndex(x => new { x.OrganizationId, x.At });
         model.Entity<Notification>().HasOne<Purchase>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.PurchaseId });
+        model.Entity<Notification>().HasOne<ProcessRun>().WithMany()
+            .HasForeignKey(x => new { x.OrganizationId, Id = x.ProcessRunId });
         model.Entity<Notification>().HasIndex(x => new { x.OrganizationId, x.Recipient, x.CreatedAt });
         model.Entity<NotificationDelivery>().HasKey(x => new { x.NotificationId, x.Channel });
         model.Entity<NotificationDelivery>().HasOne<Notification>().WithMany().HasForeignKey(x => x.NotificationId);
@@ -114,6 +153,10 @@ internal sealed class FlowOpsDb(DbContextOptions<FlowOpsDb> options) : DbContext
 
 internal sealed class Organization
 {
+    public string? ApprovalMatrixJson { get; set; }
+    public int ApprovalMatrixRevision { get; set; }
+    public string? ApprovalSlaJson { get; set; }
+    public int ApprovalSlaRevision { get; set; }
     public Guid Id { get; init; }
     public required string Name { get; init; }
     public required string Slug { get; init; }
@@ -173,6 +216,10 @@ internal sealed class OrganizationEvent
 
 internal sealed class Purchase
 {
+    public Guid? PreviousPurchaseId { get; init; }
+    public DateTimeOffset? WorkflowDueAt { get; init; }
+    public string? ReviewersJson { get; init; }
+    public int? MinimumApprovals { get; init; }
     public Guid OrganizationId { get; init; }
     public Guid Id { get; init; }
     public required string Requester { get; init; }
@@ -198,7 +245,22 @@ internal sealed class Approval
     public required string Assignee { get; set; }
     public required string BookmarkId { get; init; }
     public DateTimeOffset DueAt { get; set; }
+    public DateTimeOffset? WarnAt { get; set; }
+    public DateTimeOffset? WarnedAt { get; set; }
+    public string? EscalationAction { get; set; }
+    public string? EscalationFallback { get; set; }
     public DateTimeOffset? EscalatedAt { get; set; }
+    public string? Decision { get; set; }
+    public string? Comment { get; set; }
+    public DateTimeOffset? DecidedAt { get; set; }
+}
+
+internal sealed class ApprovalVote
+{
+    public Guid OrganizationId { get; init; }
+    public Guid PurchaseId { get; init; }
+    public int Stage { get; init; }
+    public required string Subject { get; init; }
     public string? Decision { get; set; }
     public string? Comment { get; set; }
     public DateTimeOffset? DecidedAt { get; set; }
@@ -228,9 +290,12 @@ internal sealed class AuditEvent
 
 internal sealed class Notification
 {
+    public Guid? ProcessId { get; init; }
+    public Guid? ProcessRunId { get; init; }
+    public string? ProcessTitle { get; init; }
     public Guid Id { get; init; } = Guid.NewGuid();
     public Guid OrganizationId { get; init; }
-    public Guid PurchaseId { get; init; }
+    public Guid? PurchaseId { get; init; }
     public required string Recipient { get; init; }
     public required string Kind { get; init; }
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;

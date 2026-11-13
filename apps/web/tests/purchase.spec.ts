@@ -18,6 +18,67 @@ async function login(page: Page, user: string) {
   await expect(page).toHaveURL(/\/workspace\//, { timeout: 30000 });
 }
 
+test("a process deadline survives API restart and reassigns its Elsa task once", async ({ browser, page: owner }) => {
+  const restart = process.env.FLOWOPS_CI_RESTART_DIRECTORY;
+  test.skip(!restart, "Requires the API restart harness");
+  test.setTimeout(180000);
+  const manager = await browser.newPage();
+  await login(owner, "finance");
+  await login(manager, "manager");
+  const suffix = Date.now();
+  const created = await owner.request.post("/api/organizations", {
+    headers: { origin }, data: { name: `SLA restart ${suffix}`, slug: `sla-restart-${suffix}` },
+  });
+  expect(created.status()).toBe(201);
+  const { id } = await created.json();
+  const base = `/api/organizations/${id}`;
+  const invite = await owner.request.post(`${base}/invitations`, {
+    headers: { origin }, data: { email: "manager@example.test", role: "Manager" },
+  });
+  expect(invite.status()).toBe(201);
+  expect((await manager.request.post("/api/invitations/accept", {
+    headers: { origin }, data: { code: (await invite.json()).code },
+  })).status()).toBe(200);
+  const { members } = await (await owner.request.get(`${base}/settings`)).json();
+  const fallback = members.find((member: { role: string }) => member.role === "Manager").subject;
+  const assignee = members.find((member: { role: string }) => member.role === "OrganizationOwner").subject;
+  const policy = await owner.request.post(`${base}/approval-sla`, { headers: { origin }, data: {
+    revision: 0, policy: { calendar: { timeZone: "UTC", opens: "00:00:00", closes: "23:59:00",
+      workingDays: [0, 1, 2, 3, 4, 5, 6], holidays: [] }, businessMinutes: 1, workflowMinutes: 1, action: "reassign", fallback },
+  } });
+  expect(policy.status(), await policy.text()).toBe(200);
+  const definition = await owner.request.post(`${base}/processes`, { headers: { origin }, data: {
+    name: "Restart SLA fixture", trigger: "manual", fields: [], attachment: "none",
+    steps: [{ kind: "assignment", title: "Restart SLA task", assignee }],
+  } });
+  expect(definition.status()).toBe(201);
+  const processId = (await definition.json()).id;
+  const api = `${base}/processes/${processId}`;
+  expect((await owner.request.post(`${api}/publish`, { headers: { origin }, data: { revision: 1 } })).status()).toBe(204);
+  const runId = crypto.randomUUID();
+  expect((await owner.request.post(`${api}/run`, { headers: { origin }, data: { id: runId, version: 1, answers: {} } })).status()).toBe(202);
+  const pending = async (page: Page) => (await (await page.request.get(`${base}/process-tasks?page=1`)).json()).items
+    .find((item: { runId: string }) => item.runId === runId);
+  await expect.poll(() => pending(owner)).toBeDefined();
+  const before = await pending(owner);
+  expect(Date.parse(before.dueAt)).toBeGreaterThan(Date.now());
+  await writeFile(join(restart!, "process-request"), "", { flag: "wx" });
+  await expect.poll(async () => access(join(restart!, "process-ready")).then(() => true, () => false),
+    { timeout: 45000 }).toBe(true);
+  await expect.poll(() => pending(manager), { timeout: 100000, intervals: [1000] }).toMatchObject({ dueAt: before.dueAt });
+  const noticePage = `/workspace/${id}?view=notifications`;
+  await manager.goto(noticePage);
+  const notice = manager.getByRole("link", { name: "Restart SLA task" });
+  await expect(notice).toHaveCount(1);
+  await expect(notice).toHaveAttribute("href", `/workspace/${id}/processes/${processId}?runId=${runId}`);
+  const complete = `${api}/runs/${runId}/tasks/${before.stepId}/complete`;
+  expect((await owner.request.post(complete, { headers: { origin }, data: {} })).status()).toBe(404);
+  expect((await manager.request.post(complete, { headers: { origin }, data: {} })).status()).toBe(204);
+  await expect.poll(async () => (await (await owner.request.get(`${api}?runId=${runId}`)).json())
+    .runs.find((run: { id: string }) => run.id === runId)?.status).toBe("completed");
+  await manager.close();
+});
+
 test("general processes publish, run parallel timers, and protect submitted attachments", async ({ browser, page: owner }) => {
   test.setTimeout(120000);
   const editorContext = await browser.newContext();
@@ -571,6 +632,146 @@ test("a new organization configures routing and runs an immutable published work
   expect((await owner.request.post(`${detail}/approvals/1`, { headers: { origin }, data: { decision: "approved" } })).status()).toBe(202);
   await expect.poll(async () => (await (await employee.request.get(detail)).json()).status).toBe("approved");
 
+  const delegatedId = crypto.randomUUID();
+  const delegatedPath = `${base}/purchases/${delegatedId}`;
+  expect((await employee.request.post(`${base}/purchases`, { headers: { origin }, data: { ...input, id: delegatedId } })).status()).toBe(201);
+  await expect.poll(async () => (await (await employee.request.get(delegatedPath)).json()).status).toBe("managerReview");
+  const delegatedStage = (await (await manager.request.get(delegatedPath)).json()).stages[0];
+  const delegate = `${delegatedPath}/approvals/1/delegate`;
+  const delegation = { expectedAssignee: delegatedStage.assignee, assignee: next };
+  expect((await employee.request.post(delegate, { headers: { origin }, data: delegation })).status()).toBe(404);
+  expect((await manager.request.post(delegate, { headers: { origin }, data: delegation })).status()).toBe(204);
+  const delegated = await (await owner.request.get(delegatedPath)).json();
+  expect(delegated.stages[0]).toMatchObject({ assignee: next, dueAt: delegatedStage.dueAt, canDecide: true });
+  expect(delegated.timeline).toContainEqual(expect.objectContaining({ action: "approvalDelegated" }));
+  expect((await manager.request.post(`${delegatedPath}/approvals/1`, { headers: { origin }, data: { decision: "approved" } })).status()).toBe(404);
+  expect((await owner.request.post(`${delegatedPath}/approvals/1`, { headers: { origin }, data: { decision: "approved" } })).status()).toBe(202);
+  await expect.poll(async () => (await (await employee.request.get(delegatedPath)).json()).status).toBe("approved");
+
+  const matrixApi = `${base}/approval-matrix`;
+  await owner.goto(`/workspace/${id}/settings/approval-matrix`);
+  await owner.getByRole("button", { name: "Add rule" }).click();
+  await owner.getByRole("button", { name: "Save matrix" }).click();
+  await expect(owner.getByRole("status")).toHaveText("Matrix saved");
+  await owner.getByLabel("Sample amount").fill("1100");
+  await owner.getByRole("button", { name: "Preview routing" }).click();
+  await expect(owner.getByText("Manager only / Rule priority 1")).toBeVisible();
+  const matrix = await (await owner.request.get(matrixApi)).json();
+  expect(matrix.approvalMatrixRevision).toBe(1);
+  expect((await employee.request.get(matrixApi)).status()).toBe(404);
+  expect((await owner.request.post(matrixApi, { headers: { origin }, data: { revision: 0, rules: [] } })).status()).toBe(409);
+  const matrixPurchaseId = crypto.randomUUID();
+  await owner.goto(settings);
+  await owner.getByLabel("Use business hours").check();
+  await owner.getByLabel("Time zone (IANA)").fill("UTC");
+  await owner.getByLabel("Opens").fill("00:00");
+  await owner.getByLabel("Closes").fill("23:59");
+  await owner.getByLabel("Saturday").check();
+  await owner.getByLabel("Sunday").check();
+  await owner.getByLabel("Business minutes to deadline").fill("30");
+  await owner.getByLabel("Business minutes for the full purchase workflow").fill("25");
+  await owner.getByLabel("Business minutes before deadline to remind").fill("10");
+  await owner.getByRole("button", { name: "Save deadline policy" }).click();
+  await expect(owner.getByText("Policy saved")).toBeVisible();
+  expect((await employee.request.get(`${base}/approval-sla`)).status()).toBe(404);
+  const matrixStart = Date.now();
+  expect((await employee.request.post(`${base}/purchases`, {
+    headers: { origin }, data: { ...input, id: matrixPurchaseId, amount: 1100 },
+  })).status()).toBe(201);
+  const matrixPurchase = `${base}/purchases/${matrixPurchaseId}`;
+  await expect.poll(async () => (await (await employee.request.get(matrixPurchase)).json()).status).toBe("managerReview");
+  const scheduled = await (await employee.request.get(matrixPurchase)).json();
+  expect(scheduled.stages[0].dueAt).toBe(scheduled.workflowDueAt);
+  expect(Date.parse(scheduled.workflowDueAt) - matrixStart).toBeGreaterThanOrEqual(24 * 60_000);
+  expect(Date.parse(scheduled.workflowDueAt) - matrixStart).toBeLessThan(28 * 60_000);
+  const deadlineProcess = await owner.request.post(`${base}/processes`, { headers: { origin }, data: {
+    name: "Deadline fixture", trigger: "manual", fields: [], attachment: "none",
+    steps: [{ kind: "assignment", title: "Deadline task", assignee: next }],
+  } });
+  expect(deadlineProcess.status()).toBe(201);
+  const deadlineProcessId = (await deadlineProcess.json()).id;
+  const processApi = `${base}/processes/${deadlineProcessId}`;
+  expect((await owner.request.post(`${processApi}/publish`, { headers: { origin }, data: { revision: 1 } })).status()).toBe(204);
+  const deadlineRun = crypto.randomUUID();
+  expect((await owner.request.post(`${processApi}/run`, { headers: { origin },
+    data: { id: deadlineRun, version: 1, answers: {} } })).status()).toBe(202);
+  const deadlineRunInfo = (await (await owner.request.get(processApi)).json()).runs.find((run: { id: string }) => run.id === deadlineRun);
+  await expect.poll(async () => {
+    const { items } = await (await owner.request.get(`${base}/process-tasks?page=1`)).json();
+    return items.find((task: { runId: string }) => task.runId === deadlineRun)?.dueAt;
+  }).toBe(deadlineRunInfo.dueAt);
+  expect((await manager.request.post(`${matrixPurchase}/approvals/1`, { headers: { origin }, data: { decision: "approved" } })).status()).toBe(202);
+  await expect.poll(async () => (await (await employee.request.get(matrixPurchase)).json()).status).toBe("approved");
+  const parallelRule = { ...matrix.rules[0], additionalReviewers: [next], minimumApprovals: 2 };
+  expect((await owner.request.post(matrixApi, { headers: { origin }, data: { revision: 1, rules: [parallelRule] } })).status()).toBe(200);
+  const parallelId = crypto.randomUUID();
+  const parallel = `${base}/purchases/${parallelId}`;
+  expect((await employee.request.post(`${base}/purchases`, { headers: { origin }, data: { ...input, id: parallelId } })).status()).toBe(201);
+  await expect.poll(async () => (await (await employee.request.get(parallel)).json()).status).toBe("managerReview");
+  const voteUrl = `${parallel}/approvals/1`;
+  const vote = { headers: { origin }, data: { decision: "approved" } };
+  const decisions = await Promise.all([manager.request.post(voteUrl, vote), owner.request.post(voteUrl, vote)]);
+  expect(decisions.map(response => response.status())).toEqual([202, 202]);
+  expect((await manager.request.post(voteUrl, vote)).status()).toBe(202);
+  await expect.poll(async () => (await (await employee.request.get(parallel)).json()).status).toBe("approved");
+  const parallelDetail = await (await owner.request.get(parallel)).json();
+  expect(parallelDetail.votes.map((item: { decision: string }) => item.decision)).toEqual(["approved", "approved"]);
+  expect(parallelDetail.timeline.filter((item: { action: string }) => item.action === "manager-approved")).toHaveLength(1);
+  const snapshotFlow = await owner.request.post(`${base}/workflows`, { headers: { origin },
+    data: { name: "Matrix snapshot fixture", financeThreshold: 1, graph: { ...linear.graph, useApprovalMatrix: true } } });
+  expect(snapshotFlow.status()).toBe(201);
+  const snapshotId = (await snapshotFlow.json()).id;
+  const snapshotApi = `${base}/workflows/${snapshotId}`;
+  expect((await owner.request.post(`${snapshotApi}/publish`, { headers: { origin }, data: { revision: 1 } })).status()).toBe(204);
+  expect((await owner.request.post(matrixApi, { headers: { origin }, data: { revision: 2, rules: [] } })).status()).toBe(200);
+  const pinnedId = crypto.randomUUID();
+  const pinned = `${base}/purchases/${pinnedId}`;
+  expect((await employee.request.post(`${base}/purchases`, { headers: { origin },
+    data: { ...input, id: pinnedId, workflowId: snapshotId, workflowVersion: 1 } })).status()).toBe(201);
+  await expect.poll(async () => (await (await employee.request.get(pinned)).json()).status).toBe("managerReview");
+  expect((await (await employee.request.get(pinned)).json()).minimumApprovals).toBe(2);
+  await Promise.all([manager.request.post(`${pinned}/approvals/1`, vote), owner.request.post(`${pinned}/approvals/1`, vote)]);
+  await expect.poll(async () => (await (await employee.request.get(pinned)).json()).status).toBe("approved");
+  expect((await owner.request.post(`${snapshotApi}/archive`, { headers: { origin }, data: { revision: 1 } })).status()).toBe(204);
+  const revisionId = crypto.randomUUID();
+  const revisionPurchase = `${base}/purchases/${revisionId}`;
+  expect((await employee.request.post(`${base}/purchases`, { headers: { origin }, data: { ...input, id: revisionId } })).status()).toBe(201);
+  await expect.poll(async () => (await (await employee.request.get(revisionPurchase)).json()).status).toBe("managerReview");
+  await manager.goto(`/workspace/${id}/purchases/${revisionId}`);
+  await manager.getByRole("button", { name: "Request changes", exact: true }).click();
+  await manager.getByLabel("Decision note").fill("Attach the updated quote.");
+  await manager.getByRole("button", { name: "Confirm decision (Request changes)", exact: true }).click();
+  await expect.poll(async () => (await (await employee.request.get(revisionPurchase)).json()).status).toBe("changesRequested");
+  expect((await (await employee.request.get(revisionPurchase)).json()).stages[0].comment).toBe("Attach the updated quote.");
+  await employee.goto(`/workspace/${id}/purchases/${revisionId}`);
+  await employee.getByRole("link", { name: "Submit a revision" }).click();
+  await employee.getByLabel("Business reason").fill("Updated quote attached to procurement records.");
+  await employee.getByRole("button", { name: "Submit request" }).click();
+  await expect(employee.getByRole("link", { name: "Previous request" })).toBeVisible();
+  const revisedId = new URL(employee.url()).pathname.split("/").at(-1)!;
+  const revised = `${base}/purchases/${revisedId}`;
+  await expect.poll(async () => (await (await employee.request.get(revised)).json()).status).toBe("managerReview");
+  expect((await manager.request.post(`${revised}/cancel`, { headers: { origin }, data: {} })).status()).toBe(404);
+  await employee.reload();
+  await employee.getByRole("button", { name: "Cancel purchase request" }).click();
+  await employee.getByRole("button", { name: "Confirm decision", exact: true }).click();
+  await expect(employee.getByText("Canceled", { exact: true }).first()).toBeVisible();
+  expect((await (await employee.request.get(revisionPurchase)).json()).revisedPurchaseId).toBe(revisedId);
+  const delegationApi = `${base}/approval-delegation`;
+  const schedule = { delegate: next, startsAt: new Date(Date.now() - 60000).toISOString(),
+    endsAt: new Date(Date.now() + 3600000).toISOString() };
+  expect((await employee.request.post(delegationApi, { headers: { origin }, data: schedule })).status()).toBe(400);
+  expect((await manager.request.post(delegationApi, { headers: { origin }, data: schedule })).status()).toBe(204);
+  const scheduledId = crypto.randomUUID();
+  const scheduledPurchase = `${base}/purchases/${scheduledId}`;
+  expect((await employee.request.post(`${base}/purchases`, { headers: { origin }, data: { ...input, id: scheduledId } })).status()).toBe(201);
+  await expect.poll(async () => (await (await employee.request.get(scheduledPurchase)).json()).stages[0]?.assignee).toBe(next);
+  expect((await owner.request.post(`${scheduledPurchase}/approvals/1`, vote)).status()).toBe(202);
+  await expect.poll(async () => (await (await employee.request.get(scheduledPurchase)).json()).status).toBe("approved");
+  expect((await manager.request.post(delegationApi, { headers: { origin }, data: { delegate: null } })).status()).toBe(204);
+  const slaReport = await (await owner.request.get(`${base}/reports`)).json();
+  expect(slaReport.slaOnTime).toBeGreaterThan(0);
+
   await employee.goto(`/workspace/${id}/workflows`);
   await employee.getByRole("link", { name: "Submit a request" }).click();
   await employee.getByLabel("Purchase title").fill("Versioned equipment");
@@ -596,6 +797,7 @@ test("a new organization configures routing and runs an immutable published work
   await employee.goto(`/workspace/${id}/purchases/${rejectedId}`);
   await expect(employee.getByRole("list", { name: "Steps" }).getByText("Notify requester: Skipped")).toBeVisible();
 
+  await owner.goto(`/workspace/${id}/workflows/${workflowId}`);
   await owner.getByRole("button", { name: "Manager and finance", exact: true }).click();
   await owner.getByRole("spinbutton", { name: "Finance threshold (USD)" }).fill("500");
   await expect(owner.getByRole("button", { name: "Publish version" })).toBeDisabled();

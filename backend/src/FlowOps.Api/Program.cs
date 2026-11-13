@@ -41,6 +41,7 @@ builder.Services.AddDbContext<FlowOpsDb>(options => options.UseNpgsql(connection
 builder.Services.AddProblemDetails();
 builder.Services.AddOpenApi();
 builder.Services.AddHealthChecks().AddCheck<DatabaseHealth>("postgres");
+var requestLimit = development ? Math.Clamp(builder.Configuration.GetValue("Testing:RequestsPerMinute", 240), 240, 3000) : 240;
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -49,7 +50,7 @@ builder.Services.AddRateLimiter(options =>
         var caller = context.User.FindFirstValue("sub") ?? context.Connection.RemoteIpAddress?.ToString() ?? "anonymous";
         var hubRequest = context.Request.Path.Value?.Contains("/notifications/hub", StringComparison.Ordinal) == true;
         return RateLimitPartition.GetFixedWindowLimiter(hubRequest ? $"hub:{caller}" : $"http:{caller}",
-            _ => new FixedWindowRateLimiterOptions { PermitLimit = 240, Window = TimeSpan.FromMinutes(1) });
+            _ => new FixedWindowRateLimiterOptions { PermitLimit = requestLimit, Window = TimeSpan.FromMinutes(1) });
     });
 });
 builder.Services.Configure<ForwardedHeadersOptions>(options =>

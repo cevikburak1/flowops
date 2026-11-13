@@ -9,9 +9,10 @@ import { taskText } from "../lib/tasks";
 import { LiveNotifications } from "./live-notifications";
 import { reportText } from "../lib/reports";
 import { processText } from "../lib/processes";
+import { formText } from "../lib/studio-forms";
 
-export function Shell({ children, profile, organization, locale, active }: {
-  children: React.ReactNode; profile: Profile; organization?: Organization; locale: Locale; active?: string;
+export function Shell({ children, profile, organization, locale, active, processEdit }: {
+  children: React.ReactNode; profile: Profile; organization?: Organization; locale: Locale; active?: string; processEdit?: boolean;
 }) {
   const t = messages[locale];
   const base = organization ? `/workspace/${organization.id}` : "/workspace";
@@ -25,6 +26,8 @@ export function Shell({ children, profile, organization, locale, active }: {
   const configuration = [
     { key: "workflows", href: `${base}/workflows`, icon: GitMerge, label: workflowText[locale].title },
     { key: "processes", href: `${base}/processes`, icon: Workflow, label: processText[locale].title },
+    ...(processEdit || active === "forms" || canManageOrganization(organization?.role) ?
+      [{ key: "forms", href: `${base}/forms`, icon: FileText, label: formText[locale].forms }] : []),
     ...(canManageOrganization(organization?.role) ? [
       { key: "reports", href: `${base}/reports`, icon: ChartNoAxesColumnIncreasing, label: reportText[locale].title },
       { key: "settings", href: `${base}/settings`, icon: Settings2, label: organizationText[locale].settings },

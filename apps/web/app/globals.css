@@ -353,3 +353,37 @@ td a:hover, .notification-list a:hover, .back-link:hover, .summary a:hover { col
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }
+
+.simulation-grid { display: grid; grid-template-columns: minmax(240px, .7fr) minmax(0, 1.6fr); grid-template-rows: auto 1fr; gap: 20px; align-items: start; }
+.simulation-inputs { grid-column: 1; grid-row: 1; }
+.simulation-history { grid-column: 1; grid-row: 2; }
+.simulation-output { grid-column: 2; grid-row: 1 / span 2; }
+.simulation-heading, .simulation-summary, .simulation-replay { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+.simulation-heading { justify-content: space-between; }
+.simulation-summary { color: var(--muted); }
+.simulation-issues { padding-inline-start: 20px; color: var(--danger); }
+.simulation-replay { color: var(--muted); font-size: 13px; }
+.simulation-replay select { max-width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--radius); color: var(--ink); background: var(--panel); }
+.simulation-trace { list-style: none; padding: 0; margin: 0; }
+.simulation-trace li { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) auto; gap: 10px; padding: 10px 16px; border-top: 1px solid var(--line); }
+.simulation-trace small { display: block; color: var(--muted); }
+.simulation-trace li > :last-child { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.simulation-comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.simulation-comparison ol { list-style-position: inside; padding: 0; }
+.studio-form-grid { grid-template-columns: minmax(280px, 1fr) minmax(0, 1fr); grid-template-rows: auto; }
+.studio-field { min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); }
+.studio-field legend { padding-inline: 5px; overflow-wrap: anywhere; }
+.studio-field [draggable] { cursor: grab; color: var(--muted); }
+.studio-narrow { width: min(100%, 340px); margin-inline: auto; }
+.studio-answer-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.decision-form .form-actions { flex-wrap: wrap; }
+.studio-answer-grid > div { grid-column: 1 / -1; min-width: 0; }
+.studio-answer-grid > .studio-answer-half { grid-column: span 1; }
+.studio-narrow .studio-answer-grid > .studio-answer-half { grid-column: 1 / -1; }
+.purchase-canvas .simulation-visited { --xy-edge-stroke: var(--accent); --xy-edge-stroke-width: 2.5; }
+@media (max-width: 760px) {
+  .simulation-grid { display: flex; flex-direction: column; align-items: stretch; }
+  .simulation-history { order: 1; }
+  .studio-answer-grid > .studio-answer-half { grid-column: 1 / -1; }
+  .simulation-output .simulation-trace-panel { grid-row: 2; }
+}

@@ -42,6 +42,12 @@ export default async function ReportPage({ params, searchParams }: {
         aria-current={period === data.days ? "page" : undefined}>{period} {t.days}</Link>)}
     </div>
     <div className="detail-main">
+      <section className="panel detail-panel settings-panel">
+        <h2>{t.onTime}</h2>
+        <p>{number.format(data.slaOnTime)} / {number.format(data.slaCompleted)}
+          {data.slaCompleted > 0 && <> ({new Intl.NumberFormat(locale, { style: "percent" }).format(data.slaOnTime / data.slaCompleted)})</>}
+        </p>
+      </section>
       <section className="panel data-panel" aria-labelledby="purchase-status">
         <h2 id="purchase-status">{t.purchaseStatus}</h2>
         {data.statuses.length ? <div className="table-scroll" tabIndex={0} role="region" aria-labelledby="purchase-status"><table>

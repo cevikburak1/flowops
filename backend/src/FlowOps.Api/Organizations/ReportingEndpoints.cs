@@ -30,6 +30,11 @@ internal static class ReportingEndpoints
         }).OrderBy(x => x.Status).ToListAsync(token);
         var overdue = await db.Approvals.CountAsync(x => x.OrganizationId == organizationId &&
             x.Decision == null && x.DueAt <= DateTimeOffset.UtcNow, token);
+        var decided = db.Approvals.Where(x => x.OrganizationId == organizationId && x.DecidedAt >= since && x.Decision != "canceled");
+        var compliance = await decided.GroupBy(_ => 1).Select(rows => new
+        {
+            Completed = rows.Count(), OnTime = rows.Count(row => row.DecidedAt <= row.DueAt),
+        }).SingleOrDefaultAsync(token);
         var members = await db.Memberships.CountAsync(x => x.OrganizationId == organizationId, token);
         var workflows = await db.PurchaseWorkflows.CountAsync(x => x.OrganizationId == organizationId, token);
         var plan = await db.Organizations.Where(x => x.Id == organizationId).Select(x => x.Plan).SingleAsync(token);
@@ -53,6 +58,7 @@ internal static class ReportingEndpoints
             select new { Channel = channel.Key, Count = channel.Count(), NextAttemptAt = channel.Min(x => x.NextAttemptAt) })
             .ToListAsync(token);
         return Results.Ok(new { Days = window, Statuses = statuses, Overdue = overdue, Members = members,
+            SlaCompleted = compliance?.Completed ?? 0, SlaOnTime = compliance?.OnTime ?? 0,
             Workflows = workflows, Plan = plan, Audit = audit.Take(auditPageSize), AuditPage = currentAuditPage,
             AuditHasMore = audit.Count > auditPageSize, Deliveries = deliveries });
     }

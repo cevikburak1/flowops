@@ -1,3 +1,5 @@
+param([switch]$ProcessSlaOnly)
+
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $api = $null
@@ -23,6 +25,7 @@ try {
     $restartDirectory = Join-Path ([System.IO.Path]::GetTempPath()) "flowops-ci-$([Guid]::NewGuid())"
     New-Item -ItemType Directory -Path $restartDirectory | Out-Null
     $env:FLOWOPS_CI_RESTART_DIRECTORY = $restartDirectory
+    $env:Testing__RequestsPerMinute = '1200'
     $api = Start-Process @processOptions -ArgumentList '-NoProfile', '-File', './infrastructure/dev.ps1', 'api'
     $webOptions = @{ FilePath = 'node'; PassThru = $true; WorkingDirectory = (Join-Path $root 'apps/web') }
     if ($processOptions.ContainsKey('WindowStyle')) { $webOptions.WindowStyle = $processOptions.WindowStyle }
@@ -31,23 +34,28 @@ try {
     Wait-Http 'http://127.0.0.1:3000/' $web
     $testOutput = Join-Path $restartDirectory 'playwright.stdout'
     $testErrors = Join-Path $restartDirectory 'playwright.stderr'
-    $tests = Start-Process @processOptions -ArgumentList '-NoProfile', '-File', './infrastructure/dev.ps1', 'test' `
+    $testArguments = @('-NoProfile', '-File', './infrastructure/dev.ps1', 'test')
+    if ($ProcessSlaOnly) { $testArguments += @('-Grep', 'reassigns') }
+    $tests = Start-Process @processOptions -ArgumentList $testArguments `
         -RedirectStandardOutput $testOutput -RedirectStandardError $testErrors
-    $restarted = $false
+    $restarts = [ordered]@{ 'request' = 'ready'; 'process-request' = 'process-ready' }
+    if ($ProcessSlaOnly) { $restarts.Remove('request') }
+    $completed = @()
     while (!$tests.WaitForExit(250)) {
-        if (!$restarted -and (Test-Path -LiteralPath (Join-Path $restartDirectory 'request'))) {
+        foreach ($marker in $restarts.Keys) {
+            if ($marker -in $completed -or !(Test-Path -LiteralPath (Join-Path $restartDirectory $marker))) { continue }
             if ($api.HasExited) { throw 'API exited before the requested restart' }
             $api.Kill($true)
             if (!$api.WaitForExit(10000)) { throw 'API process did not exit' }
             $api = Start-Process @processOptions -ArgumentList '-NoProfile', '-File', './infrastructure/dev.ps1', 'api'
             Wait-Http 'http://127.0.0.1:5080/health/ready' $api
-            New-Item -ItemType File -Path (Join-Path $restartDirectory 'ready') | Out-Null
-            $restarted = $true
-            Write-Output 'Restarted the FlowOps API during the pending finance approval.'
+            New-Item -ItemType File -Path (Join-Path $restartDirectory $restarts[$marker]) | Out-Null
+            $completed += $marker
+            Write-Output "Restarted the FlowOps API for $marker."
         }
     }
     if ($tests.ExitCode -ne 0) { throw "Playwright exited with code $($tests.ExitCode)" }
-    if (!$restarted) { throw 'Playwright did not exercise the API restart' }
+    if ($completed.Count -ne $restarts.Count) { throw 'Playwright did not exercise all requested API restart scenarios' }
 } finally {
     foreach ($process in @($tests, $api, $web)) {
         if ($process -and !$process.HasExited) { $process.Kill($true) }
@@ -56,7 +64,7 @@ try {
         foreach ($output in @($testOutput, $testErrors)) {
             if ($output -and (Test-Path -LiteralPath $output)) { Get-Content -LiteralPath $output }
         }
-        foreach ($file in 'request', 'ready', 'playwright.stdout', 'playwright.stderr') {
+        foreach ($file in 'request', 'ready', 'process-request', 'process-ready', 'playwright.stdout', 'playwright.stderr') {
             $marker = Join-Path $restartDirectory $file
             if (Test-Path -LiteralPath $marker) { Remove-Item -LiteralPath $marker }
         }

@@ -6,6 +6,7 @@ import { categories, label, messages, type Locale } from "../lib/messages";
 import { Button } from "./ui/button";
 import { workflowText, type PublishedWorkflow } from "../lib/workflows";
 import { priorities, taskText } from "../lib/tasks";
+import type { PurchaseDetail } from "../lib/server";
 
 async function send(path: string, payload?: object) {
   return fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload ?? {}) });
@@ -15,8 +16,30 @@ function signIn() {
   location.assign(new URL("/auth/login", location.origin));
 }
 
-export function PurchaseForm({ organizationId, currency, locale, workflow }: {
-  organizationId: string; currency: string; locale: Locale; workflow?: PublishedWorkflow;
+export function CancelPurchase({ path, locale }: { path: string; locale: Locale }) {
+  const t = messages[locale];
+  const router = useRouter();
+  const [confirm, setConfirm] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(false);
+  return <div className="form-actions flex-wrap">
+    <Button type="button" variant={confirm ? "danger" : "secondary"} disabled={busy} onClick={async () => {
+      if (!confirm) { setConfirm(true); return; }
+      setBusy(true);
+      setError(false);
+      try {
+        if (!(await send(path)).ok) throw new Error();
+        router.refresh();
+      } catch { setError(true); }
+      finally { setBusy(false); }
+    }}>{confirm ? t.confirmation : t.cancelPurchase}</Button>
+    {confirm && <Button type="button" variant="secondary" disabled={busy} onClick={() => setConfirm(false)}>{t.cancel}</Button>}
+    {error && <p className="error-text" role="alert">{t.conflict}</p>}
+  </div>;
+}
+
+export function PurchaseForm({ organizationId, currency, locale, workflow, previous }: {
+  organizationId: string; currency: string; locale: Locale; workflow?: PublishedWorkflow; previous?: PurchaseDetail;
 }) {
   const t = messages[locale];
   const router = useRouter();
@@ -35,6 +58,7 @@ export function PurchaseForm({ organizationId, currency, locale, workflow }: {
       const response = await send(`/api/organizations/${organizationId}/purchases`, {
         ...Object.fromEntries(fields), id: requestId.current, amount: Number(fields.get("amount")), currency,
         workflowId: workflow?.id, workflowVersion: workflow?.number,
+        previousPurchaseId: previous?.id,
       });
       if (response.status === 401) { signIn(); return; }
       if (response.status === 400) {
@@ -60,17 +84,17 @@ export function PurchaseForm({ organizationId, currency, locale, workflow }: {
     "aria-describedby": fieldErrors[field] ? `error-${field}` : undefined,
   });
   return <form className="stack-form" onSubmit={submit}>
-    <label>{t.title}<input name="title" required minLength={3} maxLength={120} {...validation("title")} />{feedback("title", t.titleInvalid)}</label>
+    <label>{t.title}<input name="title" defaultValue={previous?.title} required minLength={3} maxLength={120} {...validation("title")} />{feedback("title", t.titleInvalid)}</label>
     <div className="form-row">
-      <label>{t.amount} ({currency})<input name="amount" type="number" inputMode="decimal" min="0.01" max="999999999.99" step="0.01" required {...validation("amount")} />{feedback("amount", t.amountInvalid)}</label>
-      <label>{t.category}<select name="category" defaultValue="" required {...validation("category")}>
+      <label>{t.amount} ({currency})<input name="amount" defaultValue={previous?.amount} type="number" inputMode="decimal" min="0.01" max="999999999.99" step="0.01" required {...validation("amount")} />{feedback("amount", t.amountInvalid)}</label>
+      <label>{t.category}<select name="category" defaultValue={previous?.category ?? ""} required {...validation("category")}>
         <option value="" disabled>{t.chooseCategory}</option>{categories.map(category => <option key={category} value={category}>{label(locale, category)}</option>)}
       </select>{feedback("category", t.categoryInvalid)}</label>
     </div>
-    <label>{taskText[locale].priority}<select name="priority" defaultValue="normal">
+    <label>{taskText[locale].priority}<select name="priority" defaultValue={previous?.priority ?? "normal"}>
       {priorities.map(priority => <option key={priority} value={priority}>{taskText[locale][priority]}</option>)}
     </select></label>
-    <label>{t.description}<textarea name="description" required minLength={5} maxLength={2000} rows={5} {...validation("description")} />{feedback("description", t.descriptionInvalid)}</label>
+    <label>{t.description}<textarea name="description" defaultValue={previous?.description} required minLength={5} maxLength={2000} rows={5} {...validation("description")} />{feedback("description", t.descriptionInvalid)}</label>
     {error && <p className="error-text" role="alert">{error}</p>}
     <Button type="submit" disabled={busy}>{busy ? t.saving : t.submit}</Button>
   </form>;
@@ -107,7 +131,7 @@ export function DecisionForm({ path, locale }: { path: string; locale: Locale })
   const t = messages[locale];
   const router = useRouter();
   const [error, setError] = useState("");
-  const [decision, setDecision] = useState<"approved" | "rejected" | null>(null);
+  const [decision, setDecision] = useState<"approved" | "rejected" | "changesRequested" | null>(null);
   const [busy, setBusy] = useState(false);
   const [accepted, setAccepted] = useState(false);
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -125,16 +149,17 @@ export function DecisionForm({ path, locale }: { path: string; locale: Locale })
   }
   if (accepted) return <p role="status">{t.decisionSaved}</p>;
   return <form className="stack-form decision-form" onSubmit={submit}>
-    <label>{t.comment}<textarea name="comment" maxLength={1000} rows={2} /></label>
+    <label>{t.comment}<textarea name="comment" maxLength={1000} rows={2} required={decision === "changesRequested"} /></label>
     {error && <p role="alert" className="error-text">{error}</p>}
     <div className="form-actions" key={decision ?? "choose"}>{decision ? <>
       <Button type="submit" variant={decision === "approved" ? "primary" : "danger"} disabled={busy}>
-        {busy ? t.saving : `${t.confirmation} (${decision === "approved" ? t.approve : t.reject})`}
+        {busy ? t.saving : `${t.confirmation} (${decision === "approved" ? t.approve : decision === "rejected" ? t.reject : t.requestChanges})`}
       </Button>
       <Button type="button" variant="secondary" onClick={() => setDecision(null)} disabled={busy}>{t.cancel}</Button>
     </> : <>
       <Button type="button" onClick={() => setDecision("approved")}>{t.approve}</Button>
       <Button type="button" variant="secondary" onClick={() => setDecision("rejected")}>{t.reject}</Button>
+      <Button type="button" variant="secondary" onClick={() => setDecision("changesRequested")}>{t.requestChanges}</Button>
     </>}</div>
   </form>;
 }

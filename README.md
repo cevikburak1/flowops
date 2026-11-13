@@ -4,7 +4,7 @@
 
 FlowOps gives requesters a place to submit and track work, reviewers a queue of assigned decisions, and administrators a record of the rules and actions behind each outcome. The workspace is available in English and Turkish, with light and dark themes.
 
-[Quick start](#quick-start) · [Try the demo](#try-the-demo) · [Architecture](#architecture) · [Costs and licensing](#costs-and-licensing) · [Documentation](#documentation)
+[Quick start](#quick-start) · [Try the demo](#try-the-demo) · [Example workflows](#example-workflows) · [Architecture](#architecture) · [Costs and licensing](#costs-and-licensing)
 
 [![Verify](https://github.com/cevikburak1/flowops/actions/workflows/verify.yml/badge.svg?branch=main)](https://github.com/cevikburak1/flowops/actions/workflows/verify.yml)
 
@@ -18,6 +18,7 @@ FlowOps gives requesters a place to submit and track work, reviewers a queue of 
 | --- | --- |
 | **Purchase approvals** | Submit requests with amounts and priorities, route to a manager or team lead, and send qualifying purchases to finance. Reviewers get due dates and a decision history. |
 | **Workflow catalog** | Edit graphs on a drag-and-drop canvas, publish immutable versions, and inspect the execution attached to a purchase. |
+| **Workflow Studio 2.0** | Compare isolated simulation runs, publish reusable forms, configure approval matrices and parallel voting, and track SLA deadlines and escalations. |
 | **General processes** | Start runs from a form or authenticated webhook. Combine assignments, parallel branches, durable timers, and HTTP steps with named destinations. Collect text, numbers, dates, and file attachments. |
 | **Operations dashboard** | Explore 6-, 12-, or 48-month purchase history, open assigned approvals, and follow notifications. Growing lists use pagination. |
 | **Organization administration** | Invite members, organize teams and departments, configure routing and process permissions, and review audit events and delivery retries. |
@@ -54,6 +55,34 @@ Use `FLOWOPS_DEV_PASSWORD` from your local `.env` for the three development acco
 | `finance` | Complete the finance approval. Switch to **Juniper Labs** to manage workflows and processes or view reports. |
 
 To submit requests in a new organization, assign the requester a manager or a team or department lead. For optional local Mailpit, SeaweedFS, and n8n services, run `./infrastructure/dev.ps1 integrations`. Stop the app terminals with Ctrl+C and the containers with `docker compose --profile integrations stop`.
+
+## Example workflows
+
+[Browse the example files and setup steps](examples/workflows/README.md). FlowOps compiles its workflow drafts to Elsa definitions. The optional n8n workflow receives notification events for integration demos.
+
+```mermaid
+flowchart LR
+    Submit["Submit purchase"] --> Manager["Elsa waits for manager"]
+    Manager -->|Approved| Check{"Finance threshold met?"}
+    Manager -->|Rejected| Rejected["Rejected"]
+    Check -->|No| Approved["Approved"]
+    Check -->|Yes| Finance["Elsa waits for finance"]
+    Finance -->|Approved| Approved
+    Finance -->|Rejected| Rejected
+    Approved --> Outbox["FlowOps notification outbox"]
+    Rejected --> Outbox
+    Outbox -. Optional webhook .-> n8n["n8n acknowledges event"]
+```
+
+```mermaid
+flowchart LR
+    Form["Submit process form"] --> Fork["Elsa starts both branches"]
+    Fork --> A["Timer: 5 seconds"]
+    Fork --> B["Timer: 10 seconds"]
+    A --> Join["Both branches finish"]
+    B --> Join
+    Join --> Complete["Process completed"]
+```
 
 ## Architecture
 

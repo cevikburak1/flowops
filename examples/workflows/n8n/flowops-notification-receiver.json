@@ -1,0 +1,44 @@
+{
+  "name": "FlowOps notification receiver (local demo)",
+  "active": false,
+  "nodes": [
+    {
+      "id": "00cb47ad-c348-4e17-aa44-3a08790d725c",
+      "name": "FlowOps webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "webhookId": "936eea75-8df3-4748-afab-52962a094c95",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "flowops-notifications",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "58c58368-c135-48d2-8d64-1e3cdca84f23",
+      "name": "Acknowledge event",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [260, 0],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { accepted: true, eventId: $json.body.id, kind: $json.body.kind } }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "FlowOps webhook": {
+      "main": [[{ "node": "Acknowledge event", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none",
+    "saveManualExecutions": false
+  }
+}

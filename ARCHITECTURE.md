@@ -32,3 +32,7 @@ erDiagram
 ```
 
 See [TASKS.md](TASKS.md) for implementation and verification status.
+
+See [Workflow Studio 2.0](docs/WORKFLOW_STUDIO_V2.md) for the simulator boundary and the dependencies between forms, approval policies, and SLA.
+
+Process deadlines are stored with each run and task. Process completion and SLA escalation acquire the same organization lock, so a pending task can only be transferred before completion. Escalation commits the deadline marker, audit event and notification outbox in one transaction. A fallback changes the assignee while leaving the Elsa bookmark and original deadline intact.

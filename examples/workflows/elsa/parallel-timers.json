@@ -1,0 +1,15 @@
+{
+  "name": "Parallel operations checks",
+  "trigger": "manual",
+  "fields": [{ "key": "reference", "label": "Reference", "type": "text", "required": true }],
+  "attachment": "none",
+  "steps": [
+    {
+      "kind": "parallel",
+      "branches": [
+        [{ "kind": "timer", "seconds": 5 }],
+        [{ "kind": "timer", "seconds": 10 }]
+      ]
+    }
+  ]
+}

@@ -266,11 +266,13 @@ internal static class OrganizationEndpoints
             var losesManager = PurchaseEndpoints.ManagerRoles.Contains(member.Role) && !PurchaseEndpoints.ManagerRoles.Contains(role);
             var losesFinance = member.Role == "Approver" && role != "Approver";
             if ((losesManager && await db.Memberships.AnyAsync(x => x.OrganizationId == organizationId && x.Manager == member.Subject, token)) ||
+                (losesManager && await HasParallelAssignment(db, organizationId, member.Subject, token)) ||
                 (losesManager && await db.OrganizationGroups.AnyAsync(x => x.OrganizationId == organizationId && x.Lead == member.Subject, token)) ||
                 (losesFinance && organization.FinanceApprover == member.Subject) ||
                 await db.Approvals.AnyAsync(x => x.OrganizationId == organizationId && x.Assignee == member.Subject &&
                     x.Decision == null && ((x.Stage == 1 && losesManager) || (x.Stage == 2 && losesFinance)), token) ||
                 await db.Purchases.AnyAsync(x => x.OrganizationId == organizationId && x.Status != "approved" && x.Status != "rejected" &&
+                    x.Status != "changesRequested" && x.Status != "canceled" &&
                     ((losesManager && x.Manager == member.Subject) || (losesFinance && x.Finance == member.Subject)), token))
                 return Conflict("memberHasAssignments");
         }
@@ -326,8 +328,9 @@ internal static class OrganizationEndpoints
 
         var approvals = db.Approvals.Where(x => x.OrganizationId == organizationId);
         var activePurchases = db.Purchases.Where(x => x.OrganizationId == organizationId &&
-            x.Status != "approved" && x.Status != "rejected");
+            x.Status != "approved" && x.Status != "rejected" && x.Status != "changesRequested" && x.Status != "canceled");
         if (organization.FinanceApprover == memberSubject ||
+            await HasParallelAssignment(db, organizationId, memberSubject, token) ||
             await (from task in db.ProcessTasks
                 join run in db.ProcessRuns on new { task.OrganizationId, Id = task.RunId } equals new { run.OrganizationId, run.Id }
                 where task.OrganizationId == organizationId && task.Assignee == memberSubject && task.CompletedAt == null &&
@@ -354,6 +357,18 @@ internal static class OrganizationEndpoints
         await db.SaveChangesAsync(token);
         await transaction.CommitAsync(token);
         return Results.NoContent();
+    }
+
+    private static async Task<bool> HasParallelAssignment(FlowOpsDb db, Guid org, string subject, CancellationToken token)
+    {
+        var encoded = System.Text.Json.JsonSerializer.Serialize(subject);
+        return await db.Purchases.AnyAsync(x => x.OrganizationId == org && x.Status == "starting" &&
+            x.ReviewersJson != null && x.ReviewersJson.Contains(encoded), token) ||
+            await (from vote in db.ApprovalVotes
+                   join stage in db.Approvals on new { vote.OrganizationId, vote.PurchaseId, vote.Stage }
+                       equals new { stage.OrganizationId, stage.PurchaseId, stage.Stage }
+                   where vote.OrganizationId == org && vote.Subject == subject && vote.Decision == null && stage.Decision == null
+                   select vote).AnyAsync(token);
     }
 
     private static void Record(FlowOpsDb db, Guid org, string actor, string action, string? target) =>

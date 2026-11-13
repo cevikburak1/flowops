@@ -2,6 +2,8 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Testcontainers.PostgreSql;
 using Xunit;
 
@@ -96,5 +98,108 @@ public sealed class PostgresTests : IAsyncLifetime
         var channels = await read.NotificationDeliveries.Where(x => x.NotificationId == notice.Id)
             .OrderBy(x => x.Channel).Select(x => x.Channel).ToArrayAsync(token);
         Assert.Equal(new[] { "email", "rabbitmq", "realtime", "webhook" }, channels);
+    }
+
+    [Fact]
+    public async Task ParallelApprovalTransfersKeepQuorumDeadlineAndTenantScope()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var org = Guid.NewGuid();
+        var other = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var due = now.AddHours(3);
+        var purchase = new Purchase { OrganizationId = org, Id = Guid.NewGuid(), Requester = "buyer", Manager = "first",
+            Title = "Parallel fixture", Description = "Parallel fixture", Category = "equipment", Currency = "USD",
+            Amount = 10, ReviewersJson = "[\"second\"]", MinimumApprovals = 2 };
+        var status = (IResult result) => Assert.IsAssignableFrom<IStatusCodeHttpResult>(result).StatusCode;
+        await using (var db = OpenDatabase())
+        {
+            db.Organizations.AddRange(new() { Id = org, Name = "Parallel", Slug = "parallel" },
+                new() { Id = other, Name = "Other", Slug = "other" });
+            db.Memberships.AddRange(new[] { "first", "second", "replacement" }.Select(subject =>
+                new Membership { OrganizationId = org, Subject = subject, Role = "Manager" }));
+            db.Memberships.Add(new() { OrganizationId = other, Subject = "outsider", Role = "Manager" });
+            db.Purchases.Add(purchase);
+            db.ApprovalDelegations.AddRange(new() { OrganizationId = org, Subject = "first", Delegate = "replacement",
+                StartsAt = now.AddMinutes(-1), EndsAt = now.AddHours(1) }, new() { OrganizationId = org, Subject = "second",
+                Delegate = "replacement", StartsAt = now.AddMinutes(-1), EndsAt = now.AddHours(1) });
+            await db.SaveChangesAsync(token);
+            Assert.Equal(new[] { ("first", "replacement"), ("second", "second") },
+                await ApprovalDelegations.ResolveParallelAsync(db, purchase, 1, ["first", "second"], token));
+            db.Approvals.Add(new() { OrganizationId = org, PurchaseId = purchase.Id, Stage = 1, Assignee = "first",
+                BookmarkId = "bookmark", DueAt = due });
+            db.ApprovalVotes.AddRange(new() { OrganizationId = org, PurchaseId = purchase.Id, Stage = 1, Subject = "first" },
+                new() { OrganizationId = org, PurchaseId = purchase.Id, Stage = 1, Subject = "second" });
+            await db.SaveChangesAsync(token);
+        }
+        var first = new ClaimsPrincipal(new ClaimsIdentity([new Claim("sub", "first")], "test"));
+        async Task<int?> Transfer(string target, string expected)
+        {
+            await using var db = OpenDatabase();
+            return status(await ApprovalAssignments.TransferAsync(org, purchase.Id, 1, new(target, expected), first, db, true, token));
+        }
+        Assert.Equal(404, await Transfer("replacement", "second"));
+        Assert.Equal(400, await Transfer("second", "first"));
+        Assert.Equal(400, await Transfer("outsider", "first"));
+        Assert.Equal(204, await Transfer("replacement", "first"));
+        Assert.Equal(409, await Transfer("replacement", "first"));
+        await using var read = OpenDatabase();
+        var approval = await read.Approvals.SingleAsync(token);
+        Assert.Equal("replacement", approval.Assignee);
+        Assert.Equal("bookmark", approval.BookmarkId);
+        Assert.Equal(due.UtcTicks / 10, approval.DueAt.UtcTicks / 10);
+        Assert.Equal(new[] { "replacement", "second" }, await read.ApprovalVotes.OrderBy(row => row.Subject)
+            .Select(row => row.Subject).ToArrayAsync(token));
+        Assert.Equal(2, (await read.Purchases.SingleAsync(token)).MinimumApprovals);
+        Assert.Equal("replacement", (await read.Notifications.SingleAsync(token)).Recipient);
+    }
+
+    [Fact]
+    public async Task EscalationRecoversFromPersistedScheduleAndDoesNotDuplicateDelivery()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var org = Guid.NewGuid();
+        var purchase = Guid.NewGuid();
+        await using (var db = OpenDatabase())
+        {
+            db.Organizations.Add(new() { Id = org, Name = "Escalation", Slug = "escalation" });
+            db.Memberships.Add(new() { OrganizationId = org, Subject = "fallback", Role = "Manager" });
+            db.Purchases.Add(new() { OrganizationId = org, Id = purchase, Requester = "buyer", Manager = "reviewer",
+                Title = "Escalation fixture", Description = "Escalation fixture", Category = "equipment", Currency = "USD", Amount = 1 });
+            db.Approvals.Add(new() { OrganizationId = org, PurchaseId = purchase, Stage = 1, Assignee = "reviewer",
+                BookmarkId = "fixture", DueAt = DateTimeOffset.UtcNow.AddHours(1), WarnAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+                EscalationAction = "reassign", EscalationFallback = "fallback" });
+            await db.SaveChangesAsync(token);
+        }
+
+        async Task Tick()
+        {
+            var registrations = new ServiceCollection();
+            registrations.AddDbContext<FlowOpsDb>(options => options.UseNpgsql(postgres.GetConnectionString()));
+            await using var provider = registrations.BuildServiceProvider();
+            using var worker = new ApprovalAssignments(provider.GetRequiredService<IServiceScopeFactory>(), NullLogger<ApprovalAssignments>.Instance);
+            await worker.EscalateAsync(token);
+        }
+
+        await Tick();
+        await Tick();
+        await using (var db = OpenDatabase())
+        {
+            var approval = await db.Approvals.SingleAsync(row => row.OrganizationId == org, token);
+            Assert.NotNull(approval.WarnedAt);
+            approval.DueAt = DateTimeOffset.UtcNow.AddMinutes(-1);
+            await db.SaveChangesAsync(token);
+        }
+        await Tick();
+        await Tick();
+        await using var read = OpenDatabase();
+        var escalated = await read.Approvals.SingleAsync(row => row.OrganizationId == org, token);
+        Assert.Equal("fallback", escalated.Assignee);
+        Assert.Equal("fixture", escalated.BookmarkId);
+        Assert.NotNull(escalated.EscalatedAt);
+        var kinds = await read.Notifications.Where(row => row.OrganizationId == org).Select(row => row.Kind).Order().ToArrayAsync(token);
+        Assert.Equal(new[] { "approvalOverdue", "approvalReminder" }, kinds);
+        Assert.Equal(8, await (from delivery in read.NotificationDeliveries join notice in read.Notifications
+            on delivery.NotificationId equals notice.Id where notice.OrganizationId == org select delivery).CountAsync(token));
     }
 }

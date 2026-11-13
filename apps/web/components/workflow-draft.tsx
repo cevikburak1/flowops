@@ -72,6 +72,13 @@ export function WorkflowDraftForm({ api, href, locale, currency, workflow }: {
       <label>{t.name}<input name="name" required minLength={3} maxLength={120} value={name} onChange={event => setName(event.target.value)} /></label>
       <label>{t.threshold} ({currency})<input type="number" name="financeThreshold" required min="0" max="999999999.99" step="0.01"
         value={threshold} onChange={event => setThreshold(event.target.value)} /></label>
+      <label className="!flex items-center"><input className="!w-auto" type="checkbox" checked={!!graph.useApprovalMatrix}
+        onChange={event => {
+          const next = { ...graph };
+          if (event.target.checked) next.useApprovalMatrix = true;
+          else delete next.useApprovalMatrix;
+          setGraph(next);
+        }} />{t.bindApprovalMatrix}</label>
       <Button type="submit" disabled={pending}>{t.save}</Button>
     </form>}
     {workflow && !workflow.archived && <div className="form-actions flex-wrap">

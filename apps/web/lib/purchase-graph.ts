@@ -3,6 +3,7 @@ export type PurchaseNodeKind = typeof purchaseNodeKinds[number];
 export type PurchaseBranch = "above" | "below" | "approved" | "rejected";
 export interface PurchaseGraph {
   schemaVersion: number;
+  useApprovalMatrix?: boolean;
   nodes: { id: string; kind: PurchaseNodeKind; x: number; y: number }[];
   edges: { source: string; target: string; branch: PurchaseBranch | null }[];
 }

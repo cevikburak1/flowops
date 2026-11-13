@@ -15,6 +15,9 @@ internal sealed class ProcessDefinition
 
 internal sealed class ProcessRun
 {
+    public DateTimeOffset? DueAt { get; init; }
+    public string? SlaSnapshot { get; init; }
+    public DateTimeOffset? EscalatedAt { get; set; }
     public Guid OrganizationId { get; init; }
     public Guid Id { get; init; }
     public Guid ProcessId { get; init; }
@@ -40,10 +43,14 @@ internal sealed class ProcessAttachment
 
 internal sealed class ProcessTask
 {
+    public DateTimeOffset? DueAt { get; init; }
+    public DateTimeOffset? WarnAt { get; init; }
+    public DateTimeOffset? WarnedAt { get; set; }
+    public DateTimeOffset? EscalatedAt { get; set; }
     public Guid OrganizationId { get; init; }
     public Guid RunId { get; init; }
     public required string StepId { get; init; }
-    public required string Assignee { get; init; }
+    public required string Assignee { get; set; }
     public required string Title { get; init; }
     public DateTimeOffset AssignedAt { get; init; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? CompletedAt { get; set; }
@@ -52,7 +59,7 @@ internal sealed class ProcessTask
 internal sealed record ProcessPosition(double X, double Y);
 
 internal sealed record ProcessSpec(string? Name, string? Trigger, ProcessField?[]? Fields, ProcessStep?[]? Steps, string? Attachment,
-    Dictionary<string, ProcessPosition?>? Layout = null)
+    Dictionary<string, ProcessPosition?>? Layout = null, StudioFormBinding? Form = null)
 {
     public static ProcessSpec Read(string json) => JsonSerializer.Deserialize<ProcessSpec>(json, JsonSerializerOptions.Web)!;
     public string Serialize() => JsonSerializer.Serialize(this, JsonSerializerOptions.Web);

@@ -1,4 +1,5 @@
 using Elsa.Common.Models;
+using System.Text.Json;
 using Elsa.Extensions;
 using Elsa.Workflows;
 using Elsa.Workflows.Activities;
@@ -117,6 +118,13 @@ internal sealed class PurchaseWorkflowWorker(IServiceScopeFactory scopes, ILogge
         var purchase = await db.Purchases.SingleAsync(x => x.OrganizationId == command.OrganizationId && x.Id == command.PurchaseId, token);
         var instanceId = InstanceId(purchase.OrganizationId, purchase.Id);
         var client = await services.GetRequiredService<IWorkflowRuntime>().CreateClientAsync(instanceId, token);
+        if (command.Stage == -1)
+        {
+            if (await client.InstanceExistsAsync(token) &&
+                (await client.ExportStateAsync(token)).SubStatus == WorkflowSubStatus.Suspended)
+                await client.CancelAsync(token);
+            return;
+        }
         if (!await client.InstanceExistsAsync(token))
         {
             if (command.Stage != 0) throw new InvalidOperationException("Expected an existing workflow instance.");
@@ -148,18 +156,42 @@ internal sealed class PurchaseWorkflowWorker(IServiceScopeFactory scopes, ILogge
             var stage = int.Parse(bookmark.Metadata!["flowopsStage"]);
             if (stage <= command.Stage) throw new InvalidOperationException("Elsa did not consume the approval bookmark.");
             var assignee = stage == 1 ? purchase.Manager : purchase.Finance!;
+            var originalAssignee = assignee;
+            if (stage != 1 || purchase.ReviewersJson is null)
+                assignee = await ApprovalDelegations.ResolveAsync(db, purchase, stage, assignee, token);
             var approval = new Approval
             {
                 OrganizationId = purchase.OrganizationId, PurchaseId = purchase.Id,
-                Stage = stage, Assignee = assignee, BookmarkId = bookmark.Id, DueAt = DateTimeOffset.UtcNow.AddHours(48)
+                Stage = stage, Assignee = assignee, BookmarkId = bookmark.Id
             };
+            var sla = await db.Organizations.Where(org => org.Id == purchase.OrganizationId)
+                .Select(org => org.ApprovalSlaJson).SingleAsync(token);
+            ApprovalSla.Schedule(approval, sla, DateTimeOffset.UtcNow, purchase.WorkflowDueAt);
             db.Approvals.Add(approval);
+            if (stage == 1 && purchase.ReviewersJson is { } json)
+            {
+                var reviewers = JsonSerializer.Deserialize<string[]>(json)!.Prepend(assignee).ToArray();
+                foreach (var (original, reviewer) in await ApprovalDelegations.ResolveParallelAsync(db, purchase, stage, reviewers, token))
+                {
+                    if (reviewer != original)
+                    {
+                        PurchaseEndpoints.Record(db, purchase, original, "approvalDelegated");
+                        if (original == assignee) approval.Assignee = reviewer;
+                    }
+                    db.ApprovalVotes.Add(new() { OrganizationId = purchase.OrganizationId, PurchaseId = purchase.Id,
+                        Stage = stage, Subject = reviewer });
+                    if (original != assignee)
+                        db.Notifications.Add(new() { OrganizationId = purchase.OrganizationId, PurchaseId = purchase.Id,
+                            Recipient = reviewer, Kind = "approvalAssigned" });
+                }
+            }
             ApprovalAssignments.Record(db, approval, "system");
+            if (assignee != originalAssignee) PurchaseEndpoints.Record(db, purchase, originalAssignee, "approvalDelegated");
             purchase.Status = stage == 1 ? "managerReview" : "financeReview";
             db.Notifications.Add(new Notification
             {
                 OrganizationId = purchase.OrganizationId, PurchaseId = purchase.Id,
-                Recipient = assignee, Kind = "approvalAssigned"
+                Recipient = approval.Assignee, Kind = "approvalAssigned"
             });
             PurchaseEndpoints.Record(db, purchase, "system", purchase.Status);
             return;

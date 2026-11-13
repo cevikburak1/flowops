@@ -1,7 +1,8 @@
 param(
     [Parameter(Mandatory)]
     [ValidateSet('init', 'integrations', 'api', 'web', 'test')]
-    [string]$Action
+    [string]$Action,
+    [string]$Grep
 )
 
 $ErrorActionPreference = 'Stop'
@@ -48,7 +49,8 @@ if ($Action -eq 'web') {
 }
 if ($Action -eq 'test') {
     $env:FLOWOPS_DEV_PASSWORD = $config.FLOWOPS_DEV_PASSWORD
-    & $npm --prefix (Join-Path $root 'apps/web') run test:e2e
+    if ($Grep) { & $npm --prefix (Join-Path $root 'apps/web') run test:e2e -- --grep $Grep }
+    else { & $npm --prefix (Join-Path $root 'apps/web') run test:e2e }
     exit $LASTEXITCODE
 }
 

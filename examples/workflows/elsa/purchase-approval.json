@@ -1,0 +1,21 @@
+{
+  "name": "Equipment purchase approval",
+  "financeThreshold": 5000,
+  "graph": {
+    "schemaVersion": 1,
+    "nodes": [
+      { "id": "start", "kind": "start", "x": 0, "y": 110 },
+      { "id": "manager", "kind": "manager", "x": 210, "y": 110 },
+      { "id": "threshold", "kind": "threshold", "x": 420, "y": 110 },
+      { "id": "finance", "kind": "finance", "x": 630, "y": 0 },
+      { "id": "end", "kind": "end", "x": 840, "y": 110 }
+    ],
+    "edges": [
+      { "source": "start", "target": "manager" },
+      { "source": "manager", "target": "threshold" },
+      { "source": "threshold", "target": "finance", "branch": "above" },
+      { "source": "threshold", "target": "end", "branch": "below" },
+      { "source": "finance", "target": "end" }
+    ]
+  }
+}

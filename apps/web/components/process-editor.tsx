@@ -1,5 +1,8 @@
 "use client";
 
+import { StudioFormFields, visibleFormAnswers } from "./studio-form-fields";
+import { formText, type StudioSchema } from "../lib/studio-forms";
+
 import { useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "./ui/button";
@@ -100,6 +103,8 @@ export function ProcessEditor({ api, href, locale, targets, members, process }: 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
+  const [mappingFields, setMappingFields] = useState<StudioSchema["fields"]>([]);
+  const ft = formText[locale];
   const dirty = JSON.stringify(spec) !== JSON.stringify(process?.draft);
 
   async function save(event: FormEvent<HTMLFormElement>) {
@@ -133,6 +138,20 @@ export function ProcessEditor({ api, href, locale, targets, members, process }: 
     finally { setBusy(false); }
   }
 
+  async function loadMapping() {
+    if (!spec.form) return;
+    setBusy(true);
+    setError("");
+    try {
+      const root = api.split("/processes")[0];
+      const response = await fetch(`${root}/forms/${encodeURIComponent(spec.form.id)}/versions/${spec.form.version}`);
+      if (!response.ok) throw new Error("invalidProcess");
+      const schema = await response.json() as StudioSchema;
+      setMappingFields(schema.fields.filter(field => !["heading", "description", "file"].includes(field.type)));
+    } catch (failure) { setError(message(t, failure)); }
+    finally { setBusy(false); }
+  }
+
   return <section className="panel detail-panel">
     <form className="stack-form" onSubmit={save}>
       <label>{t.name}<input required minLength={3} maxLength={100} value={spec.name}
@@ -148,7 +167,33 @@ export function ProcessEditor({ api, href, locale, targets, members, process }: 
       </div>
       <section className="settings-panel">
         <h2>{t.fields}</h2>
-        {spec.fields.map((field, index) => {
+        <label className="!flex items-center">
+          <input className="!w-auto" type="checkbox" checked={!!spec.form} onChange={event =>
+            setSpec({ ...spec, form: event.target.checked ? { id: "", version: 1 } : null })} />
+          {formText[locale].binding}
+        </label>
+        {spec.form && <div className="settings-panel">
+          <p className="muted">{formText[locale].bindingHint}</p>
+          <div className="form-row">
+            <label>{formText[locale].formId}<input required value={spec.form.id}
+              onChange={event => { setMappingFields([]); setSpec({ ...spec, form: { id: event.target.value, version: spec.form!.version } }); }} /></label>
+            <label>{formText[locale].version}<input required type="number" min="1" value={spec.form.version}
+              onChange={event => { setMappingFields([]); setSpec({ ...spec, form: { id: spec.form!.id, version: Number(event.target.value) } }); }} /></label>
+          </div>
+          <details className="settings-panel"><summary>{ft.mapping}</summary>
+            <Button type="button" variant="secondary" disabled={busy || !spec.form.id} onClick={() => void loadMapping()}>{ft.loadVersion}</Button>
+            {mappingFields.map(field => <label key={field.key}>{field.label} / {ft.inputName}
+              <input value={spec.form?.inputMap?.[field.key] ?? ""} placeholder={field.key} maxLength={64}
+                pattern="[a-zA-Z0-9_]+" onChange={event => {
+                  const inputMap = { ...spec.form!.inputMap };
+                  if (event.target.value) inputMap[field.key] = event.target.value;
+                  else delete inputMap[field.key];
+                  setSpec({ ...spec, form: { ...spec.form!, inputMap } });
+                }} />
+            </label>)}
+          </details>
+        </div>}
+        {!spec.form && spec.fields.map((field, index) => {
           const update = (value: Partial<typeof field>) =>
             setSpec({ ...spec, fields: spec.fields.map(item => item.key === field.key ? { ...item, ...value } : item) });
           return <div key={field.key} className="settings-panel">
@@ -166,7 +211,7 @@ export function ProcessEditor({ api, href, locale, targets, members, process }: 
             </div>
           </div>;
         })}
-        {spec.fields.length < 12 && <Button type="button" variant="secondary" className="justify-self-start"
+        {!spec.form && spec.fields.length < 12 && <Button type="button" variant="secondary" className="justify-self-start"
           onClick={() => setSpec({ ...spec, fields: [...spec.fields, {
             key: crypto.randomUUID().replaceAll("-", ""), label: "", type: "text", required: false
           }] })}>{t.addField}</Button>}
@@ -195,10 +240,18 @@ export function ProcessRunForm({ api, locale, process }: { api: string; locale: 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [started, setStarted] = useState(false);
+  const [answers, setAnswers] = useState<Record<string, string>>(process.submissionDraft?.answers ?? {});
+  const [draftRevision, setDraftRevision] = useState(process.submissionDraft?.revision ?? 0);
+  const [draftSaved, setDraftSaved] = useState(false);
+  const [step, setStep] = useState(1);
+  const ft = formText[locale];
   const spec = process.published!;
+  const lastStep = Math.max(1, ...(process.form?.fields.map(field => field.step ?? 1) ?? []));
+  const fileField = process.form?.fields.find(field => field.type === "file");
 
   async function run(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (step < lastStep) { setStep(step + 1); return; }
     setBusy(true);
     setError("");
     setStarted(false);
@@ -206,37 +259,69 @@ export function ProcessRunForm({ api, locale, process }: { api: string; locale: 
     try {
       const values = new FormData(form);
       const file = values.get("attachment");
-      let attachment;
+      let payload;
       if (file instanceof File && file.name) {
-        if (file.size === 0 || file.size > process.attachmentLimit) throw new Error("invalidAttachment");
+        if (file.size === 0 || file.size > Math.min(process.attachmentLimit, (fileField?.fileLimitKiB ?? 10240) * 1024))
+          throw new Error("invalidAttachment");
         const content = await new Promise<string>((resolve, reject) => {
           const reader = new FileReader();
           reader.onload = () => resolve(String(reader.result).split(",", 2)[1]);
           reader.onerror = () => reject(new Error("invalidAttachment"));
           reader.readAsDataURL(file);
         });
-        attachment = { name: file.name, content };
+        payload = { name: file.name, content };
       }
       requestId.current ??= crypto.randomUUID();
       await submit(`${api}/run`, {
         id: requestId.current, version: process.version,
-        answers: Object.fromEntries(spec.fields.map(field => [field.key, values.get(field.key)])), attachment
+        draftRevision: process.form ? draftRevision : undefined,
+        answers: process.form ? visibleFormAnswers(process.form, answers) :
+          Object.fromEntries(spec.fields.map(field => [field.key, values.get(field.key)])), attachment: payload
       });
       requestId.current = null;
       form.reset();
+      setAnswers({});
+      setStep(1);
+      setDraftRevision(0);
+      setDraftSaved(false);
       setStarted(true);
       router.refresh();
-    } catch (failure) { setError(message(t, failure)); }
+    } catch (failure) { setError(failure instanceof Error && failure.message === "submissionDraftChanged" ? ft.submissionConflict : message(t, failure)); }
     finally { setBusy(false); }
   }
 
-  return <form className="stack-form" onSubmit={run} onChange={() => { requestId.current = null; }}>
-    {spec.fields.map(field => <label key={field.key}>{field.label}
+  async function saveAnswers() {
+    if (!process.form || busy) return;
+    setBusy(true);
+    setError("");
+    setDraftSaved(false);
+    try {
+      const response = await fetch(`${api}/submission-draft`, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ version: process.version, revision: draftRevision, answers: visibleFormAnswers(process.form, answers) }) });
+      if (response.status === 409) { setError(ft.submissionConflict); return; }
+      if (response.status === 400) { setError(t.invalidAnswers); return; }
+      if (!response.ok) throw new Error();
+      setDraftRevision((await response.json() as { revision: number }).revision);
+      setDraftSaved(true);
+    } catch { setError(t.error); }
+    finally { setBusy(false); }
+  }
+
+  return <form className="stack-form" onSubmit={run} onChange={() => { requestId.current = null; setDraftSaved(false); }}>
+    {lastStep > 1 && <p className="muted">{ft.step} {step} / {lastStep}</p>}
+    {process.form ? <StudioFormFields schema={process.form} locale={locale} values={answers} choices={process.formChoices} step={step}
+      onChange={(key, value) => setAnswers(current => ({ ...current, [key]: value }))} /> :
+      spec.fields.map(field => <label key={field.key}>{field.label}
       <input name={field.key} type={field.type} required={field.required}
         step={field.type === "number" ? "any" : undefined} maxLength={field.type === "text" ? 2000 : undefined} /></label>)}
-    {spec.attachment !== "none" && <label>{t.attachment} ({process.attachmentLimit / 1048576} MiB)
+    {!fileField && step === lastStep && spec.attachment !== "none" && <label>{t.attachment} ({process.attachmentLimit / 1048576} MiB)
       <input type="file" name="attachment" required={spec.attachment === "required"} /></label>}
-    <Button type="submit" disabled={busy}>{t.run}</Button>
+    <div className="form-actions flex-wrap">
+      {step > 1 && <Button type="button" variant="secondary" disabled={busy} onClick={() => setStep(step - 1)}>{ft.previousStep}</Button>}
+      <Button type="submit" disabled={busy}>{step < lastStep ? ft.nextStep : t.run}</Button>
+      {process.form && <Button type="button" variant="secondary" disabled={busy} onClick={() => void saveAnswers()}>{ft.saveSubmission}</Button>}
+    </div>
+    {draftSaved && <p role="status">{ft.submissionSaved}</p>}
     {started && <p role="status">{t.started}</p>}
     {error && <p role="alert" className="error-text">{error}</p>}
   </form>;

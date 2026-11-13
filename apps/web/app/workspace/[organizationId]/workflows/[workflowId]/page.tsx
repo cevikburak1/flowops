@@ -7,6 +7,7 @@ import { canManageOrganization } from "../../../../../lib/organization";
 import { label } from "../../../../../lib/messages";
 import { getApi, getLocale, type Profile } from "../../../../../lib/server";
 import { workflowStatus, workflowText, type WorkflowDetail } from "../../../../../lib/workflows";
+import { simulationText } from "../../../../../lib/simulation";
 
 export default async function Workflow({ params, searchParams }: {
   params: Promise<{ organizationId: string; workflowId: string }>; searchParams: Promise<{ page?: string; versionPage?: string }>;
@@ -25,7 +26,10 @@ export default async function Workflow({ params, searchParams }: {
   return <Shell profile={profile} organization={organization} locale={locale} active="workflows">
     <Link className="back-link" href={`${base}/workflows`}>{t.title}</Link>
     <header className="page-header"><h1>{workflow.name}</h1>
-      <span className="status">{status === "published" && workflow.hasDraft ? t.unpublishedChanges : t[status]}</span>
+      <div className="form-actions flex-wrap">
+        <span className="status">{status === "published" && workflow.hasDraft ? t.unpublishedChanges : t[status]}</span>
+        <Link className="button secondary" href={`${base}/workflows/${workflowId}/simulation`}>{simulationText[locale].title}</Link>
+      </div>
     </header>
     <div className="detail-main">
       <section className="panel detail-panel settings-panel">
