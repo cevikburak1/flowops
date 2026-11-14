@@ -4,6 +4,78 @@ namespace FlowOps.Api.Tests;
 
 public sealed class SimulationTests
 {
+    [Theory]
+    [InlineData("below", 200)]
+    [InlineData("approved", 422)]
+    public void CopilotNotificationEditsRequireAnExistingTerminalEdge(string branch, int status)
+    {
+        var graph = PurchaseGraph.Default;
+        var workflow = new PurchaseWorkflowDefinition
+            { Name = "Original", FinanceThreshold = 5000, Revision = 2, GraphJson = graph.Serialize() };
+        var usage = new CopilotUsage { Subject = "test", Model = "test", Feature = "edit" };
+        var output = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            name = (string?)null, financeThreshold = (decimal?)null, limitations = Array.Empty<string>(),
+            notifyOn = new { source = "threshold", target = "end", branch }
+        });
+        var result = CopilotTools.ReviewEdit(output, usage, workflow, graph, workflow.Name, workflow.FinanceThreshold);
+        Assert.Equal(status, Assert.IsAssignableFrom<Microsoft.AspNetCore.Http.IStatusCodeHttpResult>(result).StatusCode);
+        Assert.Equal(graph.Serialize(), workflow.GraphJson);
+        if (status != 200) return;
+        var value = Assert.IsAssignableFrom<Microsoft.AspNetCore.Http.IValueHttpResult>(result).Value;
+        var draft = Assert.IsType<WorkflowDraft>(value!.GetType().GetProperty("Draft")!.GetValue(value));
+        Assert.Equal(2, draft.Revision);
+        var proposed = Assert.IsType<PurchaseGraph>(draft.Graph);
+        var low = WorkflowSimulation.Run(proposed, 5000, new(null, 1, 4000, "approved", "approved"), TestContext.Current.CancellationToken);
+        var high = WorkflowSimulation.Run(proposed, 5000, new(null, 1, 6000, "approved", "approved"), TestContext.Current.CancellationToken);
+        Assert.Contains(low.Steps, step => step.MockNotification);
+        Assert.DoesNotContain(high.Steps, step => step.MockNotification);
+    }
+
+    [Theory]
+    [InlineData("text", 200)]
+    [InlineData("arbitraryCode", 422)]
+    public void CopilotFormRequiresAStudioFieldType(string type, int status)
+    {
+        var output = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            name = "Leave request",
+            fields = new[] { new { key = "details", label = "Reason", type, required = true, step = 1 } }
+        });
+        var usage = new CopilotUsage { Subject = "test", Model = "test", Feature = "form" };
+        Assert.Equal(status, Assert.IsAssignableFrom<Microsoft.AspNetCore.Http.IStatusCodeHttpResult>(
+            CopilotTools.ReviewForm(output, usage)).StatusCode);
+    }
+
+    [Fact]
+    public void CopilotEditPreservesGraphAndRejectsMatrixThresholdChanges()
+    {
+        var workflow = new PurchaseWorkflowDefinition { Name = "Original", FinanceThreshold = 100, Revision = 8 };
+        var usage = new CopilotUsage { Subject = "test", Model = "test", Feature = "edit" };
+        const string output = """{"name":"Updated","financeThreshold":500,"limitations":[]}""";
+        var graph = PurchaseGraph.Default;
+        var result = CopilotTools.ReviewEdit(output, usage, workflow, graph, workflow.Name, workflow.FinanceThreshold);
+        Assert.Equal(200, Assert.IsAssignableFrom<Microsoft.AspNetCore.Http.IStatusCodeHttpResult>(result).StatusCode);
+        Assert.Equal("Original", workflow.Name);
+        Assert.Equal(100, workflow.FinanceThreshold);
+        var denied = CopilotTools.ReviewEdit(output, usage, workflow, graph with { UseApprovalMatrix = true },
+            workflow.Name, workflow.FinanceThreshold);
+        Assert.Equal(422, Assert.IsAssignableFrom<Microsoft.AspNetCore.Http.IStatusCodeHttpResult>(denied).StatusCode);
+    }
+
+    [Theory]
+    [InlineData("manager", true)]
+    [InlineData("managerNotify", true)]
+    [InlineData("managerFinance", true)]
+    [InlineData("managerFinanceNotify", true)]
+    [InlineData("arbitraryCode", false)]
+    public void CopilotOnlyCompilesSupportedRoutes(string route, bool valid)
+    {
+        var proposal = new CopilotProposal("Example", route, 0, []);
+        Assert.Equal(valid, proposal.Valid());
+        if (valid) Assert.True(proposal.Graph()!.CanPublish());
+    }
+
     [Fact]
     public void BusinessCalendarSkipsHolidayAndUsesPostTransitionOffset()
     {

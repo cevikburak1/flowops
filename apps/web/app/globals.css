@@ -131,6 +131,10 @@ a { color: inherit; text-underline-offset: 4px; }
 .org-menu li a { display: block; padding: 8px; border-radius: var(--radius); text-decoration: none; }
 .topbar .org-menu[open] > ul { width: min(250px, calc(100vw - 75px)); min-width: 0; max-height: 55dvh; overflow: auto; }
 .org-menu li a { overflow-wrap: anywhere; }
+.topbar .copilot-menu[open] > ul { left: auto; right: 0; }
+@media (max-width: 600px) {
+  .topbar .copilot-menu summary span { display: none; }
+}
 .org-menu summary { display: flex; align-items: center; gap: 9px; list-style: none; font-weight: 550; }
 .org-menu summary::-webkit-details-marker { display: none; }
 .org-menu summary span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

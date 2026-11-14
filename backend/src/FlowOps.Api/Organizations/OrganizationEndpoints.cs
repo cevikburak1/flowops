@@ -76,6 +76,9 @@ internal static class OrganizationEndpoints
             .OrderByDescending(x => x.ExpiresAt).Select(x => new { x.Id, x.Email, x.Role, x.ExpiresAt }).ToListAsync(token);
         return Results.Ok(new { Members = members, Groups = groups, Invitations = invitations, organization.FinanceThreshold,
             organization.FinanceApprover, organization.WebhookEnabled,
+            CopilotEnabled = organization.CopilotEnabled,
+            CopilotMonthlyRequests = organization.CopilotMonthlyRequests,
+            CopilotHistoryDays = organization.CopilotHistoryDays,
             WebhookAvailable = !string.IsNullOrEmpty(config["Integrations:Webhook:Url"]),
             CanAssignAdmin = actor.Role == "OrganizationOwner", ActorSubject = actor.Subject,
             ProcessPermissions = ProcessPermissions.Read(organization.ProcessPermissions) });
@@ -371,7 +374,7 @@ internal static class OrganizationEndpoints
                    select vote).AnyAsync(token);
     }
 
-    private static void Record(FlowOpsDb db, Guid org, string actor, string action, string? target) =>
+    internal static void Record(FlowOpsDb db, Guid org, string actor, string action, string? target) =>
         db.OrganizationEvents.Add(new OrganizationEvent { OrganizationId = org, Actor = actor, Action = action, Target = target });
 }
 

@@ -32,6 +32,7 @@ internal static class PurchaseEndpoints
         OrganizationEndpoints.Map(api, tenant);
         ReportingEndpoints.Map(api, tenant);
         WorkflowCatalog.Map(tenant);
+        CopilotEndpoints.Map(tenant);
         WorkflowSimulationEndpoints.Map(tenant);
         ProcessEndpoints.Map(tenant);
         StudioFormEndpoints.Map(tenant);

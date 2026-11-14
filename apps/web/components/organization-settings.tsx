@@ -226,6 +226,24 @@ export function Settings({ data, base, currency, locale, pages }: {
           <label><span>{t.webhook}</span><input className="w-auto" type="checkbox" name="enabled" defaultChecked={data.webhookEnabled} /></label>
         </SettingsForm> : <p className="muted">{t.webhookUnavailable}</p>}
       </section>
+      {data.canAssignAdmin && <section className="panel detail-panel settings-panel">
+        <h2>{t.copilot}</h2>
+        <p className="muted">{t.copilotHint}</p>
+        <SettingsForm locale={locale} action={async fields => {
+          const response = await fetch(`${base}/copilot/v1/settings`, { method: "PATCH", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ enabled: fields.get("enabledMode") === "inherit" ? null : fields.get("enabledMode") === "on",
+              monthlyRequests: fields.get("monthlyRequests") ? Number(fields.get("monthlyRequests")) : null,
+              historyDays: fields.get("historyDays") ? Number(fields.get("historyDays")) : null }) });
+          if (!response.ok) throw new Error((await response.json().catch(() => ({}))).code ?? "error");
+          router.refresh();
+        }}>
+          <label>{t.copilotEnabled}<select name="enabledMode" defaultValue={data.copilotEnabled === null ? "inherit" : data.copilotEnabled ? "on" : "off"}>
+            <option value="inherit">Default</option><option value="on">On</option><option value="off">Off</option>
+          </select></label>
+          <label>{t.copilotRequests}<input name="monthlyRequests" type="number" min="1" max="10000" step="1" defaultValue={data.copilotMonthlyRequests ?? ""} /></label>
+          <label>{t.copilotHistory}<input name="historyDays" type="number" min="0" max="90" step="1" defaultValue={data.copilotHistoryDays ?? ""} /></label>
+        </SettingsForm>
+      </section>}
       <section className="panel detail-panel settings-panel">
         <h2 id="settings-groups">{t.groups}</h2>
         {groups.items.map(group => <details key={group.id} className="member-details">

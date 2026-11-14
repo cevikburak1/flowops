@@ -30,3 +30,26 @@
 See [technical design](docs/WORKFLOW_STUDIO_V2.md).
 
 The approval matrix covers the purchase manager and finance stages; arbitrary workflow-variable predicates and additional stage types are outside this implementation. Purchase SLA fallback reassignment applies to a single reviewer; parallel participants receive reminders and can be transferred individually. The simulator records a trace after execution and does not expose a live debugger. External delivery depends on the configured notification channels.
+
+## Phase 2 · AI Workflow Copilot
+
+- [ ] AI foundation with live provider verification, tenant administration and usage reporting.
+  - [x] Server-side provider, tenant request metering, operator allowlist, estimated cost and paginated usage API.
+  - [x] Tenant administrators can opt in/out and set monthly limits and history retention from organization settings.
+- [x] Text-to-Workflow beyond the initial manager and finance purchase routes.
+  - [x] Add manager-notification and manager-finance-notification validated graph routes.
+- [ ] Conversational workflow editor.
+  - [x] Review and apply name and threshold changes with revision checks.
+  - [x] Preview and insert a requester notification on a validated terminal edge. Verify that applying the proposal preserves the published version.
+  - [x] Save, reuse and clear private workflow questions, answers, and reviewed draft proposals with configurable expiration.
+  - [x] Open the appropriate Copilot panel from the workspace header, including the current workflow when available.
+- [ ] AI form generator.
+  - [x] Validate and preview generated fields and save through the existing form draft endpoint.
+- [ ] Workflow explainer and error analyzer.
+  - [x] Analyze a selected workflow version and summarize failed runs using bounded execution evidence.
+- [ ] Optimization and controlled analytics.
+  - [x] Use tenant-scoped status counts and overdue approvals with a chart in Reports.
+  - [x] Include mean time from submission to an approval decision with its sample size.
+- [ ] Production hardening and end-to-end verification.
+
+See [Copilot architecture](docs/AI_COPILOT_ARCHITECTURE.md) for the first slice and its limits.
