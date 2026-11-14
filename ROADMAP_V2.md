@@ -35,11 +35,13 @@ The approval matrix covers the purchase manager and finance stages; arbitrary wo
 
 - [ ] AI foundation with live provider verification, tenant administration and usage reporting.
   - [x] Server-side provider, tenant request metering, operator allowlist, estimated cost and paginated usage API.
-- [ ] Text-to-Workflow beyond the initial manager and finance purchase routes.
+  - [x] Tenant administrators can opt in/out and set monthly limits and history retention from organization settings.
+- [x] Text-to-Workflow beyond the initial manager and finance purchase routes.
+  - [x] Add manager-notification and manager-finance-notification validated graph routes.
 - [ ] Conversational workflow editor.
   - [x] Review and apply name and threshold changes with revision checks.
   - [x] Preview and insert a requester notification on a validated terminal edge. Verify that applying the proposal preserves the published version.
-  - [x] Save, reuse and clear private workflow questions and answers with configurable expiration. Persistent proposals remain open.
+  - [x] Save, reuse and clear private workflow questions, answers, and reviewed draft proposals with configurable expiration.
   - [x] Open the appropriate Copilot panel from the workspace header, including the current workflow when available.
 - [ ] AI form generator.
   - [x] Validate and preview generated fields and save through the existing form draft endpoint.

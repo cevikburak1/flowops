@@ -34,6 +34,8 @@ const en = {
   Approver: "Approver", Employee: "Employee", Viewer: "Viewer",
   ProcessEditor: "Process editor", ProcessOperator: "Process operator",
   processPermissions: "Process permissions", editProcess: "Edit and publish", runProcess: "Start runs", inspectProcess: "View all runs",
+  copilot: "AI Copilot", copilotEnabled: "Enable Copilot for this organization", copilotRequests: "Monthly request limit",
+  copilotHistory: "Saved question retention (days)", copilotHint: "The operator must also configure a provider and model. Blank values inherit operator defaults.",
 };
 
 const tr: typeof en = {
@@ -70,6 +72,8 @@ const tr: typeof en = {
   Approver: "Onaylayıcı", Employee: "Çalışan", Viewer: "İzleyici",
   ProcessEditor: "Süreç editörü", ProcessOperator: "Süreç operatörü",
   processPermissions: "Süreç yetkileri", editProcess: "Düzenle ve yayınla", runProcess: "Çalıştır", inspectProcess: "Tüm çalıştırmaları gör",
+  copilot: "AI Copilot", copilotEnabled: "Bu kuruluş için Copilot'u etkinleştir", copilotRequests: "Aylık istek sınırı",
+  copilotHistory: "Kayıtlı soru saklama (gün)", copilotHint: "Operatörün ayrıca sağlayıcı ve model yapılandırması gerekir. Boş değerler operatör varsayılanlarını kullanır.",
 };
 
 export const organizationText = { en, tr };
@@ -93,5 +97,8 @@ export interface OrganizationSettings {
   actorSubject: string;
   webhookAvailable: boolean;
   webhookEnabled: boolean;
+  copilotEnabled: boolean | null;
+  copilotMonthlyRequests: number | null;
+  copilotHistoryDays: number | null;
   processPermissions: Record<string, { edit: boolean; run: boolean; inspect: boolean }>;
 }

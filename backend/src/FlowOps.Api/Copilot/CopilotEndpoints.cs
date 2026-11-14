@@ -35,7 +35,17 @@ internal sealed record CopilotProposal(string? Name, string? Route, decimal? Fin
     {
         "manager" => new(1, [new("start", "start", 0, 110), new("manager", "manager", 210, 110),
             new("end", "end", 420, 110)], [new("start", "manager"), new("manager", "end")]),
+        "managerNotify" => new(1, [new("start", "start", 0, 110), new("manager", "manager", 210, 110),
+            new("notify", "notify", 350, 110), new("end", "end", 500, 110)],
+            [new("start", "manager"), new("manager", "notify"), new("notify", "end")]),
         "managerFinance" => PurchaseGraph.Default,
+        "managerFinanceNotify" => PurchaseGraph.Default with
+        {
+            Nodes = [new("start", "start", 0, 110), new("manager", "manager", 210, 110), new("threshold", "threshold", 420, 110),
+                new("finance", "finance", 630, 0), new("notify", "notify", 780, 0), new("end", "end", 930, 110)],
+            Edges = [new("start", "manager"), new("manager", "threshold"), new("threshold", "end", "below"),
+                new("threshold", "finance", "above"), new("finance", "notify"), new("notify", "end")]
+        },
         _ => null
     };
 
@@ -44,7 +54,7 @@ internal sealed record CopilotProposal(string? Name, string? Route, decimal? Fin
         (Route == "unsupported" ? Limitations.Length > 0 : Limitations.Length == 0 &&
             FinanceThreshold is >= 0 and <= 999_999_999.99m &&
             decimal.Round(FinanceThreshold.Value, 2) == FinanceThreshold &&
-            (Route != "manager" || FinanceThreshold == 0) && Graph()?.CanPublish() == true);
+            (Route is not ("manager" or "managerNotify") || FinanceThreshold == 0) && Graph()?.CanPublish() == true);
 }
 
 internal static class CopilotEndpoints
@@ -56,12 +66,15 @@ internal static class CopilotEndpoints
         var routes = tenant.MapGroup("/copilot/v1");
         routes.MapGet("/status", StatusAsync);
         routes.MapGet("/usage", UsageAsync);
+        routes.MapGet("/settings", SettingsAsync);
+        routes.MapPatch("/settings", UpdateSettingsAsync);
         routes.MapPost("/purchase-proposals", GenerateAsync);
         CopilotTools.Map(routes);
         CopilotHistory.Map(routes);
     }
 
-    private static bool Enabled(IConfiguration config, Guid organizationId) => config.GetValue<bool>("Copilot:Enabled") &&
+    private static bool Enabled(IConfiguration config, Guid organizationId, Organization? organization = null) =>
+        (organization?.CopilotEnabled ?? config.GetValue<bool>("Copilot:Enabled")) &&
         !string.IsNullOrWhiteSpace(config["Copilot:ApiKey"]) &&
         (string.IsNullOrWhiteSpace(config["Copilot:Organizations"]) ||
             config["Copilot:Organizations"]!.Split(',', StringSplitOptions.TrimEntries)
@@ -73,6 +86,7 @@ internal static class CopilotEndpoints
         IConfiguration config, CancellationToken token)
     {
         if (await OrganizationEndpoints.FindAdminAsync(db, organizationId, user, token) is null) return Results.NotFound();
+        var organization = await db.Organizations.AsNoTracking().SingleAsync(row => row.Id == organizationId, token);
         var now = DateTimeOffset.UtcNow;
         var month = new DateTimeOffset(now.Year, now.Month, 1, 0, 0, 0, TimeSpan.Zero);
         var usage = db.CopilotUsages.Where(row => row.OrganizationId == organizationId && row.At >= month);
@@ -82,10 +96,43 @@ internal static class CopilotEndpoints
             OutputTokens = rows.Sum(row => (long?)row.OutputTokens),
             Cost = rows.Sum(row => row.EstimatedCostUsd), CostSamples = rows.Count(row => row.EstimatedCostUsd != null)
         }).SingleOrDefaultAsync(token);
-        return Results.Ok(new { Enabled = Enabled(config, organizationId), MonthlyLimit = MonthlyLimit(config),
-            HistoryDays = CopilotHistory.Days(config),
+        return Results.Ok(new { Enabled = Enabled(config, organizationId, organization), MonthlyLimit = MonthlyLimit(config, organization),
+            HistoryDays = CopilotHistory.Days(config, organization),
             Requests = totals?.Requests ?? 0, totals?.InputTokens, totals?.OutputTokens,
             EstimatedCostUsd = totals?.CostSamples > 0 ? totals.Cost : null });
+    }
+
+    private static async Task<IResult> SettingsAsync(Guid organizationId, ClaimsPrincipal user, FlowOpsDb db,
+        IConfiguration config, CancellationToken token)
+    {
+        if (await OrganizationEndpoints.FindAdminAsync(db, organizationId, user, token) is null) return Results.NotFound();
+        var organization = await db.Organizations.AsNoTracking().SingleAsync(row => row.Id == organizationId, token);
+        return Results.Ok(new { Enabled = organization.CopilotEnabled ?? config.GetValue<bool>("Copilot:Enabled"),
+            MonthlyRequests = organization.CopilotMonthlyRequests ?? MonthlyLimit(config, null),
+            HistoryDays = organization.CopilotHistoryDays ?? config.GetValue("Copilot:HistoryDays", 0),
+            OperatorEnabled = config.GetValue<bool>("Copilot:Enabled"),
+            OperatorModelConfigured = !string.IsNullOrWhiteSpace(config["Copilot:Model"]) });
+    }
+
+    private static async Task<IResult> UpdateSettingsAsync(Guid organizationId, CopilotSettingsInput input,
+        ClaimsPrincipal user, FlowOpsDb db, IConfiguration config, CancellationToken token)
+    {
+        await using var transaction = await db.Database.BeginTransactionAsync(token);
+        var organization = await OrganizationEndpoints.LockAsync(db, organizationId, token);
+        var actor = await OrganizationEndpoints.FindAdminAsync(db, organizationId, user, token);
+        if (organization is null || actor is null) return Results.NotFound();
+        if (input.Enabled is null) organization.CopilotEnabled = null;
+        else organization.CopilotEnabled = input.Enabled.Value;
+        if (input.MonthlyRequests is not (null or >= 1 and <= 10000)) return Results.BadRequest(new { Code = "invalidMonthlyRequests" });
+        if (input.HistoryDays is not (null or >= 0 and <= 90)) return Results.BadRequest(new { Code = "invalidHistoryDays" });
+        organization.CopilotMonthlyRequests = input.MonthlyRequests;
+        organization.CopilotHistoryDays = input.HistoryDays;
+        OrganizationEndpoints.Record(db, organizationId, actor.Subject, "copilotSettingsUpdated", null);
+        await db.SaveChangesAsync(token);
+        await transaction.CommitAsync(token);
+        return Results.Ok(new { Enabled = organization.CopilotEnabled ?? config.GetValue<bool>("Copilot:Enabled"),
+            MonthlyRequests = organization.CopilotMonthlyRequests ?? MonthlyLimit(config, null),
+            HistoryDays = organization.CopilotHistoryDays ?? config.GetValue("Copilot:HistoryDays", 0) });
     }
 
     private static async Task<IResult> UsageAsync(Guid organizationId, int? page, ClaimsPrincipal user, FlowOpsDb db,
@@ -110,7 +157,8 @@ internal static class CopilotEndpoints
         CopilotContract? contract, object? context, Func<string, CopilotUsage, CancellationToken, IResult> review)
     {
         if (await OrganizationEndpoints.FindAdminAsync(db, organizationId, user, token) is not { } member) return Results.NotFound();
-        if (!Enabled(config, organizationId)) return Error(503, "copilotUnavailable");
+        var organizationSettings = await db.Organizations.AsNoTracking().SingleOrDefaultAsync(row => row.Id == organizationId, token);
+        if (!Enabled(config, organizationId, organizationSettings)) return Error(503, "copilotUnavailable");
         if (input.Prompt?.Trim() is not { Length: >= 10 and <= 2000 } prompt) return Error(400, "invalidPrompt");
 
         var usage = new CopilotUsage { OrganizationId = organizationId, Subject = member.Subject,
@@ -122,7 +170,7 @@ internal static class CopilotEndpoints
             var now = usage.At;
             var month = new DateTimeOffset(now.Year, now.Month, 1, 0, 0, 0, TimeSpan.Zero);
             var rows = db.CopilotUsages.Where(row => row.OrganizationId == organizationId);
-            if (await rows.CountAsync(row => row.At >= month, token) >= MonthlyLimit(config) ||
+            if (await rows.CountAsync(row => row.At >= month, token) >= MonthlyLimit(config, org) ||
                 await rows.CountAsync(row => row.Subject == member.Subject && row.At >= now.AddMinutes(-1), token) >= 4)
                 return Error(429, "copilotLimit");
             db.CopilotUsages.Add(usage);
@@ -196,9 +244,10 @@ internal static class CopilotEndpoints
             ? (input * usage.InputTokens + output * usage.OutputTokens) / 1_000_000m : null;
     }
 
-    private static int MonthlyLimit(IConfiguration config) => Math.Clamp(config.GetValue("Copilot:MonthlyRequests", 30), 1, 10000);
+    internal static int MonthlyLimit(IConfiguration config, Organization? organization) => Math.Clamp(organization?.CopilotMonthlyRequests ?? config.GetValue("Copilot:MonthlyRequests", 30), 1, 10000);
     private static IResult Error(int status, string code) => Results.Json(new { code }, statusCode: status);
     internal sealed record CopilotInput(string? Prompt);
+    internal sealed record CopilotSettingsInput(bool? Enabled, int? MonthlyRequests, int? HistoryDays);
 }
 
 

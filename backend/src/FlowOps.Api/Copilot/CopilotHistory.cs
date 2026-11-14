@@ -39,7 +39,7 @@ internal static class CopilotHistory
         FlowOpsDb db, IConfiguration config, CancellationToken token)
     {
         if (!await Allowed(organizationId, workflowId, user, db, token)) return Results.NotFound();
-        var days = Days(config);
+        var days = Days(config, await db.Organizations.AsNoTracking().SingleAsync(row => row.Id == organizationId, token));
         var now = DateTimeOffset.UtcNow;
         var items = await Own(db, organizationId, workflowId, user)
             .Where(row => row.ExpiresAt > now)
@@ -52,7 +52,7 @@ internal static class CopilotHistory
         ClaimsPrincipal user, FlowOpsDb db, IConfiguration config, CancellationToken token)
     {
         if (!await Allowed(organizationId, workflowId, user, db, token)) return Results.NotFound();
-        var days = Days(config);
+        var days = Days(config, await db.Organizations.AsNoTracking().SingleAsync(row => row.Id == organizationId, token));
         if (days == 0) return Results.Conflict(new { Code = "historyDisabled" });
         if (input.Prompt?.Trim() is not { Length: >= 10 and <= 2000 } text || input.Answer?.Length > 4000)
             return Results.BadRequest(new { Code = "invalidPrompt" });
@@ -84,7 +84,7 @@ internal static class CopilotHistory
         return Results.NoContent();
     }
 
-    internal static int Days(IConfiguration config) => Math.Clamp(config.GetValue("Copilot:HistoryDays", 0), 0, 90);
+    internal static int Days(IConfiguration config, Organization? organization = null) => Math.Clamp(organization?.CopilotHistoryDays ?? config.GetValue("Copilot:HistoryDays", 0), 0, 90);
     internal sealed record SavedQuestionInput(string? Prompt, string? Answer = null);
 }
 

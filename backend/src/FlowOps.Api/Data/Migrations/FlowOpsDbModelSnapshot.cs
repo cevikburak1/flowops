@@ -482,6 +482,15 @@ namespace FlowOps.Api.Data.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<bool?>("CopilotEnabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<int?>("CopilotHistoryDays")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("CopilotMonthlyRequests")
+                        .HasColumnType("integer");
+
                     b.Property<string>("FinanceApprover")
                         .HasColumnType("text");
 

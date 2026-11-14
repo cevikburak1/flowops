@@ -177,6 +177,11 @@ internal sealed class Organization
     public bool WebhookEnabled { get; set; }
     public string Plan { get; set; } = "starter";
     public string? ProcessPermissions { get; set; }
+    // Tenant administrators can opt in and tune the Copilot budget without changing
+    // the operator-wide defaults. Null means inherit the server configuration.
+    public bool? CopilotEnabled { get; set; }
+    public int? CopilotMonthlyRequests { get; set; }
+    public int? CopilotHistoryDays { get; set; }
 }
 
 internal sealed class Membership

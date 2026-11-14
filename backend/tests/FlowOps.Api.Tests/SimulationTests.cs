@@ -65,7 +65,9 @@ public sealed class SimulationTests
 
     [Theory]
     [InlineData("manager", true)]
+    [InlineData("managerNotify", true)]
     [InlineData("managerFinance", true)]
+    [InlineData("managerFinanceNotify", true)]
     [InlineData("arbitraryCode", false)]
     public void CopilotOnlyCompilesSupportedRoutes(string route, bool valid)
     {

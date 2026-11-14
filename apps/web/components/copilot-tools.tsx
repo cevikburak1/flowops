@@ -20,7 +20,7 @@ const copy = {
     threshold: "Finance threshold", name: "Workflow name", requests: "Requests this month",
     graph: "Proposed workflow", notification: "Add a notification on the connection",
     action: "Copilot action",
-    savedQuestions: "Saved questions", saveQuestion: "Save this question", clearQuestions: "Clear saved questions",
+    savedQuestions: "Saved questions", saveQuestion: "Save this question", saveProposal: "Save proposal", clearQuestions: "Clear saved questions",
     retention: "Questions expire after", daysUnit: "days", none: "No saved questions.",
     saveExchange: "Save question and answer", readAnswer: "Read saved answer",
     processes: "Process runs", purchases: "Purchase requests", overdue: "Overdue approvals now",
@@ -39,7 +39,7 @@ const copy = {
     threshold: "Finans eşiği", name: "İş akışı adı", requests: "Bu ayki istekler",
     graph: "Önerilen iş akışı", notification: "Bağlantıya bildirim ekle",
     action: "Copilot işlemi",
-    savedQuestions: "Kaydedilen sorular", saveQuestion: "Bu soruyu kaydet", clearQuestions: "Kaydedilen soruları sil",
+    savedQuestions: "Kaydedilen sorular", saveQuestion: "Bu soruyu kaydet", saveProposal: "Öneriyi kaydet", clearQuestions: "Kaydedilen soruları sil",
     retention: "Soruların saklanma süresi", daysUnit: "gün", none: "Kayıtlı soru yok.",
     saveExchange: "Soruyu ve yanıtı kaydet", readAnswer: "Kayıtlı yanıtı oku",
     processes: "Süreç çalışmaları", purchases: "Satın alma talepleri", overdue: "Şu an geciken onaylar",
@@ -104,7 +104,8 @@ export function CopilotTools({ organizationId, locale, kind, resourceId, version
     try {
       const response = await fetch(historyPath, method === "POST" ? {
         method, headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(exchange?.prompt === prompt ? exchange : { prompt }),
+        body: JSON.stringify(exchange?.prompt === prompt ? exchange : { prompt,
+          answer: result?.draft ? JSON.stringify(result.draft) : undefined }),
       } : { method });
       if (!response.ok) throw new Error();
       await readSaved();
@@ -202,7 +203,7 @@ export function CopilotTools({ organizationId, locale, kind, resourceId, version
         <div className="form-actions flex-wrap mt-2">
           {saved.retentionDays > 0 && status?.enabled && <button type="button" className="button secondary"
             disabled={historyBusy || prompt.trim().length < 10} onClick={() => void updateSaved("POST")}>
-            {exchange?.prompt === prompt ? t.saveExchange : t.saveQuestion}
+            {exchange?.prompt === prompt ? t.saveExchange : result?.draft ? t.saveProposal : t.saveQuestion}
           </button>}
           {saved.items.length > 0 && <button type="button" className="button secondary" disabled={historyBusy}
             onClick={() => void updateSaved("DELETE")}>{t.clearQuestions}</button>}

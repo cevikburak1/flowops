@@ -69,3 +69,5 @@
 - [x] Persist explicitly saved Copilot questions with per-user access, a limit of 20 per workflow, expiration and deletion. Verify 29 backend tests and a focused Playwright persistence scenario.
 - [x] Add contextual workspace shortcuts and optional saved answers. The five Copilot browser tests verify navigation, persistence and clearing. Frontend lint and production build passed.
 - [x] Return the average time from submission to a recorded approval decision and its sample size. Verify query execution in PostgreSQL. The full backend suite passed 29 tests on rerun before this final analytics change.
+- [x] Add tenant-level Copilot opt-in, request limits, history retention controls, and usage visibility in organization settings. Persist reviewed workflow proposals through the private workflow history path.
+- [x] Extend text-to-workflow beyond the initial routes with manager-notification and manager-finance-notification graph proposals, including publish-shape tests.
