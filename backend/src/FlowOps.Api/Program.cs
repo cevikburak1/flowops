@@ -123,6 +123,9 @@ builder.Services.AddSingleton<ProcessObjectStore>();
 builder.Services.AddHttpClient("flowops-process", client => client.Timeout = TimeSpan.FromSeconds(10))
     .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
 builder.Services.AddSingleton<IUserIdProvider, KeycloakUserIdProvider>();
+builder.Services.AddScoped<ICopilotProvider, OpenAiCopilotProvider>();
+builder.Services.AddHttpClient("copilot", client => client.Timeout = Timeout.InfiniteTimeSpan)
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddHttpClient("flowops-webhook").ConfigurePrimaryHttpMessageHandler(() =>
     new SocketsHttpHandler { AllowAutoRedirect = false });
 if (builder.Configuration["Integrations:Webhook:Url"] is { Length: > 0 } webhook &&
@@ -145,6 +148,7 @@ builder.Services.AddElsa(elsa =>
     elsa.AddWorkflow<PurchaseApprovalWorkflow>();
 });
 builder.Services.AddHostedService<PurchaseWorkflowWorker>();
+builder.Services.AddHostedService<CopilotHistoryCleanup>();
 builder.Services.AddHostedService<ProcessWorker>();
 builder.Services.AddHostedService<ApprovalAssignments>();
 builder.Services.AddHostedService<NotificationDispatcher>();

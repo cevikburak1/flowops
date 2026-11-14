@@ -5,11 +5,12 @@ import { Pagination } from "../../../../components/pagination";
 import { label } from "../../../../lib/messages";
 import { canManageOrganization } from "../../../../lib/organization";
 import { reportLabel, reportText, type Report } from "../../../../lib/reports";
+import { CopilotTools } from "../../../../components/copilot-tools";
 import { getApi, getLocale, type Profile } from "../../../../lib/server";
 
 export default async function ReportPage({ params, searchParams }: {
   params: Promise<{ organizationId: string }>;
-  searchParams: Promise<{ days?: string; auditPage?: string; auditSource?: string }>;
+  searchParams: Promise<{ days?: string; auditPage?: string; auditSource?: string; copilot?: string }>;
 }) {
   const [{ organizationId }, query, profile, locale] = await Promise.all([params, searchParams, getApi<Profile>("/api/me"), getLocale()]);
   const organization = profile.organizations.find(org => org.id === organizationId);
@@ -31,6 +32,7 @@ export default async function ReportPage({ params, searchParams }: {
   const date = new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" });
   return <Shell profile={profile} organization={organization} locale={locale} active="reports">
     <header className="page-header"><h1>{t.title}</h1><span className="status">{t.plan} / {t[data.plan]}</span></header>
+    <CopilotTools organizationId={organizationId} locale={locale} kind="analytics" autoOpen={query.copilot === "1"} />
     <dl className="summary">
       <div><dt>{t.overdue}</dt><dd>{number.format(data.overdue)}</dd></div>
       <div><dt>{t.members}</dt><dd>{number.format(data.members)}</dd></div>

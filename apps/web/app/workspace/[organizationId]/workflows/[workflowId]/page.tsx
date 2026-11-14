@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { Shell } from "../../../../../components/shell";
 import { Pagination } from "../../../../../components/pagination";
 import { WorkflowDraftForm } from "../../../../../components/workflow-draft";
+import { CopilotTools } from "../../../../../components/copilot-tools";
 import { canManageOrganization } from "../../../../../lib/organization";
 import { label } from "../../../../../lib/messages";
 import { getApi, getLocale, type Profile } from "../../../../../lib/server";
@@ -10,9 +11,9 @@ import { workflowStatus, workflowText, type WorkflowDetail } from "../../../../.
 import { simulationText } from "../../../../../lib/simulation";
 
 export default async function Workflow({ params, searchParams }: {
-  params: Promise<{ organizationId: string; workflowId: string }>; searchParams: Promise<{ page?: string; versionPage?: string }>;
+  params: Promise<{ organizationId: string; workflowId: string }>; searchParams: Promise<{ page?: string; versionPage?: string; copilot?: string }>;
 }) {
-  const [{ organizationId, workflowId }, { page, versionPage }, profile, locale] = await Promise.all([params, searchParams, getApi<Profile>("/api/me"), getLocale()]);
+  const [{ organizationId, workflowId }, { page, versionPage, copilot }, profile, locale] = await Promise.all([params, searchParams, getApi<Profile>("/api/me"), getLocale()]);
   const organization = profile.organizations.find(item => item.id === organizationId);
   if (!organization || !canManageOrganization(organization.role) || !/^[0-9a-f-]{36}$/i.test(workflowId)) notFound();
   const base = `/workspace/${organizationId}`;
@@ -23,7 +24,7 @@ export default async function Workflow({ params, searchParams }: {
   const date = new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeZone: "UTC" });
   const money = new Intl.NumberFormat(locale, { style: "currency", currency: organization.currency });
   const status = workflowStatus(workflow);
-  return <Shell profile={profile} organization={organization} locale={locale} active="workflows">
+  return <Shell profile={profile} organization={organization} locale={locale} active="workflows" copilotWorkflowId={workflow.archived ? undefined : workflowId}>
     <Link className="back-link" href={`${base}/workflows`}>{t.title}</Link>
     <header className="page-header"><h1>{workflow.name}</h1>
       <div className="form-actions flex-wrap">
@@ -31,10 +32,12 @@ export default async function Workflow({ params, searchParams }: {
         <Link className="button secondary" href={`${base}/workflows/${workflowId}/simulation`}>{simulationText[locale].title}</Link>
       </div>
     </header>
+    {!workflow.archived && <CopilotTools organizationId={organizationId} locale={locale} kind="workflow"
+      resourceId={workflowId} autoOpen={copilot === "1"} versions={workflow.versions.map(version => version.number)} />}
     <div className="detail-main">
       <section className="panel detail-panel settings-panel">
         <h2>{workflow.archived ? t.duplicate : t.settings}</h2>
-        <WorkflowDraftForm key={workflow.id} api={api} href={`${base}/workflows`} currency={organization.currency} locale={locale} workflow={workflow} />
+        <WorkflowDraftForm key={`${workflow.id}:${workflow.revision}`} api={api} href={`${base}/workflows`} currency={organization.currency} locale={locale} workflow={workflow} />
       </section>
       <div className="detail-grid">
         <section className="panel detail-panel">

@@ -1,4 +1,4 @@
-import { Bell, ChartNoAxesColumnIncreasing, ChevronsUpDown, ClipboardCheck, FileText, GitMerge, LayoutGrid, ListTodo, LogOut, Menu, Plus, Settings2, ShieldCheck, Workflow } from "lucide-react";
+import { Bell, ChartNoAxesColumnIncreasing, ChevronsUpDown, ClipboardCheck, FileText, GitMerge, LayoutGrid, ListTodo, LogOut, Menu, MessageSquare, Plus, Settings2, ShieldCheck, Workflow } from "lucide-react";
 import Link from "next/link";
 import type { Profile, Organization } from "../lib/server";
 import { messages, type Locale } from "../lib/messages";
@@ -11,11 +11,18 @@ import { reportText } from "../lib/reports";
 import { processText } from "../lib/processes";
 import { formText } from "../lib/studio-forms";
 
-export function Shell({ children, profile, organization, locale, active, processEdit }: {
+const copilotCopy = {
+  en: { label: "Copilot", current: "Ask about this workflow", workflow: "Draft a purchase workflow", form: "Generate a form", reports: "Ask about performance" },
+  tr: { label: "Copilot", current: "Bu iş akışı hakkında sor", workflow: "Satın alma akışı taslağı oluştur", form: "Form oluştur", reports: "Performans hakkında sor" },
+};
+
+export function Shell({ children, profile, organization, locale, active, processEdit, copilotWorkflowId }: {
   children: React.ReactNode; profile: Profile; organization?: Organization; locale: Locale; active?: string; processEdit?: boolean;
+  copilotWorkflowId?: string;
 }) {
   const t = messages[locale];
   const base = organization ? `/workspace/${organization.id}` : "/workspace";
+  const copilot = copilotCopy[locale];
   const operations = [
     { key: "overview", href: base, icon: LayoutGrid, label: t.overview },
     { key: "requests", href: `${base}?view=requests`, icon: FileText, label: t.requests },
@@ -66,6 +73,15 @@ export function Shell({ children, profile, organization, locale, active, process
           </details>}
         </div>
         <div className="header-actions">
+          {organization && canManageOrganization(organization.role) && <details className="org-menu copilot-menu">
+            <summary aria-label={copilot.label}><MessageSquare size={17} aria-hidden /><span>{copilot.label}</span></summary>
+            <ul>
+              {copilotWorkflowId && <li><Link href={`${base}/workflows/${copilotWorkflowId}?copilot=1#workflow-copilot`}>{copilot.current}</Link></li>}
+              <li><Link href={`${base}/workflows?copilot=1#workflow-copilot`}>{copilot.workflow}</Link></li>
+              <li><Link href={`${base}/forms?copilot=1#form-copilot`}>{copilot.form}</Link></li>
+              <li><Link href={`${base}/reports?copilot=1#analytics-copilot`}>{copilot.reports}</Link></li>
+            </ul>
+          </details>}
           <Preferences locale={locale} />
           {profile.name && <span className="profile-name"><span className="profile-initial" aria-hidden>{initials(profile.name)}</span>{profile.name}</span>}
           <form action="/auth/logout" method="post"><button type="submit" className="button icon-button" aria-label={t.signOut}><LogOut size={17} aria-hidden /></button></form>

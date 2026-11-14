@@ -4,6 +4,8 @@ import { RefreshPending } from "../../../../../components/forms";
 import { CompleteProcessTask, ProcessEditor, ProcessRunForm } from "../../../../../components/process-editor";
 import { Shell } from "../../../../../components/shell";
 import { Pagination } from "../../../../../components/pagination";
+import { CopilotTools } from "../../../../../components/copilot-tools";
+import { canManageOrganization } from "../../../../../lib/organization";
 import { processText, type ProcessDetail } from "../../../../../lib/processes";
 import { getApi, getLocale, messages, type Profile } from "../../../../../lib/server";
 
@@ -57,6 +59,8 @@ export default async function ProcessPage({ params, searchParams }: {
         {data.runs.length === 0 ? <p className="muted">{t.noRuns}</p> :
           <ol>{data.runs.map(run => <li key={run.id}>
             <strong>{t[run.status]}</strong>
+            {run.status === "failed" && canManageOrganization(organization.role) &&
+              <CopilotTools organizationId={organizationId} locale={locale} kind="failure" resourceId={run.id} />}
             <time dateTime={run.createdAt}>{date.format(new Date(run.createdAt))} UTC</time>
             {run.dueAt && <time dateTime={run.dueAt}>{t.deadline} {date.format(new Date(run.dueAt))} UTC</time>}
             {run.status === "running" && run.escalatedAt && <span className="status" data-status="rejected">{messages[locale].processOverdue}</span>}

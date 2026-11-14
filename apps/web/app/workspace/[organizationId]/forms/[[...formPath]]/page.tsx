@@ -3,13 +3,15 @@ import { notFound } from "next/navigation";
 import { Shell } from "../../../../../components/shell";
 import { Pagination } from "../../../../../components/pagination";
 import { StudioFormEditor } from "../../../../../components/studio-form-editor";
+import { CopilotTools } from "../../../../../components/copilot-tools";
+import { canManageOrganization } from "../../../../../lib/organization";
 import { getApi, getLocale, type Profile } from "../../../../../lib/server";
 import { formText, type StudioFormDetail, type StudioForms } from "../../../../../lib/studio-forms";
 
 export default async function FormsPage({ params, searchParams }: {
-  params: Promise<{ organizationId: string; formPath?: string[] }>; searchParams: Promise<{ page?: string }>;
+  params: Promise<{ organizationId: string; formPath?: string[] }>; searchParams: Promise<{ page?: string; copilot?: string }>;
 }) {
-  const [{ organizationId, formPath }, { page }, locale, profile] = await Promise.all([
+  const [{ organizationId, formPath }, { page, copilot }, locale, profile] = await Promise.all([
     params, searchParams, getLocale(), getApi<Profile>("/api/me"),
   ]);
   const organization = profile.organizations.find(item => item.id === organizationId);
@@ -26,6 +28,7 @@ export default async function FormsPage({ params, searchParams }: {
     <header className="page-header"><h1>{form?.draft.name ?? (id ? t.create : t.forms)}</h1>
       {!id && <Link className="button primary" href={`${href}/new`}>{t.create}</Link>}
     </header>
+    {!id && canManageOrganization(organization.role) && <CopilotTools organizationId={organizationId} locale={locale} kind="forms" autoOpen={copilot === "1"} />}
     {id ? <StudioFormEditor key={id} form={form} api={form ? `${api}/${id}` : api} href={href} locale={locale}
       pagination={form && <Pagination page={form.page} more={form.hasMore} href={next => `?page=${next}`} locale={locale} label={t.history} />} /> :
       <section className="panel data-panel">

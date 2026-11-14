@@ -6,6 +6,8 @@ namespace FlowOps.Api;
 internal sealed class FlowOpsDb(DbContextOptions<FlowOpsDb> options) : DbContext(options)
 {
     public DbSet<Organization> Organizations => Set<Organization>();
+    public DbSet<CopilotUsage> CopilotUsages => Set<CopilotUsage>();
+    public DbSet<CopilotQuestion> CopilotQuestions => Set<CopilotQuestion>();
     public DbSet<Membership> Memberships => Set<Membership>();
     public DbSet<OrganizationGroup> OrganizationGroups => Set<OrganizationGroup>();
     public DbSet<ApprovalAssignment> ApprovalAssignments => Set<ApprovalAssignment>();
@@ -34,6 +36,15 @@ internal sealed class FlowOpsDb(DbContextOptions<FlowOpsDb> options) : DbContext
     protected override void OnModelCreating(ModelBuilder model)
     {
         model.HasDefaultSchema("flowops");
+        model.Entity<CopilotUsage>().HasOne<Organization>().WithMany().HasForeignKey(row => row.OrganizationId);
+        model.Entity<CopilotUsage>().HasIndex(row => new { row.OrganizationId, row.At });
+        model.Entity<CopilotUsage>().HasIndex(row => new { row.OrganizationId, row.Subject, row.At });
+        model.Entity<CopilotQuestion>().HasOne<PurchaseWorkflowDefinition>().WithMany()
+            .HasForeignKey(row => new { row.OrganizationId, Id = row.WorkflowId });
+        model.Entity<CopilotQuestion>().HasOne<Membership>().WithMany()
+            .HasForeignKey(row => new { row.OrganizationId, row.Subject });
+        model.Entity<CopilotQuestion>().HasIndex(row => new { row.OrganizationId, row.WorkflowId, row.Subject, row.CreatedAt });
+        model.Entity<CopilotQuestion>().HasIndex(row => row.ExpiresAt);
         model.Entity<StudioFormDefinition>().HasKey(x => new { x.OrganizationId, x.Id });
         model.Entity<StudioFormDefinition>().HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId);
         model.Entity<StudioFormDefinition>().HasIndex(x => new { x.OrganizationId, x.Name });

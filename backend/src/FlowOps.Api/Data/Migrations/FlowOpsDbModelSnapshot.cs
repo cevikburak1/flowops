@@ -210,6 +210,95 @@ namespace FlowOps.Api.Data.Migrations
                     b.ToTable("Audit", "flowops");
                 });
 
+            modelBuilder.Entity("FlowOps.Api.CopilotQuestion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Answer")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Subject")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("WorkflowId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExpiresAt");
+
+                    b.HasIndex("OrganizationId", "Subject");
+
+                    b.HasIndex("OrganizationId", "WorkflowId", "Subject", "CreatedAt");
+
+                    b.ToTable("CopilotQuestions", "flowops");
+                });
+
+            modelBuilder.Entity("FlowOps.Api.CopilotUsage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("At")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("DurationMs")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal?>("EstimatedCostUsd")
+                        .HasColumnType("numeric");
+
+                    b.Property<string>("Feature")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int?>("InputTokens")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Model")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int?>("OutputTokens")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Subject")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "At");
+
+                    b.HasIndex("OrganizationId", "Subject", "At");
+
+                    b.ToTable("CopilotUsages", "flowops");
+                });
+
             modelBuilder.Entity("FlowOps.Api.Invitation", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1030,6 +1119,30 @@ namespace FlowOps.Api.Data.Migrations
                     b.HasOne("FlowOps.Api.Purchase", null)
                         .WithMany()
                         .HasForeignKey("OrganizationId", "PurchaseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("FlowOps.Api.CopilotQuestion", b =>
+                {
+                    b.HasOne("FlowOps.Api.Membership", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "Subject")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("FlowOps.Api.PurchaseWorkflowDefinition", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "WorkflowId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("FlowOps.Api.CopilotUsage", b =>
+                {
+                    b.HasOne("FlowOps.Api.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

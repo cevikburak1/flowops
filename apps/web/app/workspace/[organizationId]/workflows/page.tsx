@@ -2,12 +2,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Shell } from "../../../../components/shell";
 import { Pagination } from "../../../../components/pagination";
+import { WorkflowCopilot } from "../../../../components/workflow-copilot";
 import { canManageOrganization } from "../../../../lib/organization";
 import { getApi, getLocale, type Profile, type Workspace } from "../../../../lib/server";
 import { workflowStatus, workflowStatuses, workflowText, type WorkflowList } from "../../../../lib/workflows";
 
 export default async function Workflows({ params, searchParams }: {
-  params: Promise<{ organizationId: string }>; searchParams: Promise<{ page?: string; q?: string; status?: string }>;
+  params: Promise<{ organizationId: string }>; searchParams: Promise<{ page?: string; q?: string; status?: string; copilot?: string }>;
 }) {
   const [{ organizationId }, query, profile, locale] = await Promise.all([params, searchParams, getApi<Profile>("/api/me"), getLocale()]);
   const organization = profile.organizations.find(item => item.id === organizationId);
@@ -28,6 +29,7 @@ export default async function Workflows({ params, searchParams }: {
     <header className="page-header"><h1>{t.title}</h1>
       {canManage && <Link className="button primary" href={`${base}/workflows/new`}>{t.create}</Link>}
     </header>
+    {canManage && <WorkflowCopilot api={api} base={base} locale={locale} currency={organization.currency} autoOpen={query.copilot === "1"} />}
     <section className="panel detail-panel">
       <h2>{t.template}</h2>
       <p className="muted mt-2">{t.templateHint}</p>

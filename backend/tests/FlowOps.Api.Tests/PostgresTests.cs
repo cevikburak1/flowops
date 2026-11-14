@@ -11,6 +11,95 @@ namespace FlowOps.Api.Tests;
 
 public sealed class PostgresTests : IAsyncLifetime
 {
+    [Fact]
+    public async Task CopilotSavedQuestionsArePrivateBoundedAndCanBeCleared()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var org = Guid.NewGuid();
+        var flow = new PurchaseWorkflowDefinition { OrganizationId = org, Name = "History workflow" };
+        await using var db = OpenDatabase();
+        db.Organizations.Add(new() { Id = org, Name = "History", Slug = "history" });
+        db.Memberships.AddRange(new() { OrganizationId = org, Subject = "owner", Role = "OrganizationOwner" },
+            new() { OrganizationId = org, Subject = "admin", Role = "OrganizationAdmin" });
+        db.PurchaseWorkflows.Add(flow);
+        await db.SaveChangesAsync(token);
+        var owner = new ClaimsPrincipal(new ClaimsIdentity([new Claim("sub", "owner")], "test"));
+        var admin = new ClaimsPrincipal(new ClaimsIdentity([new Claim("sub", "admin")], "test"));
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            { ["Copilot:HistoryDays"] = "7" }).Build();
+        var now = DateTimeOffset.UtcNow;
+        db.CopilotQuestions.AddRange(Enumerable.Range(0, 21).Select(index => new CopilotQuestion
+        {
+            OrganizationId = org, WorkflowId = flow.Id, Subject = "owner", Text = $"Question number {index}",
+            CreatedAt = now.AddMinutes(-index), ExpiresAt = index == 0 ? now.AddDays(-1) : now.AddDays(1)
+        }));
+        await db.SaveChangesAsync(token);
+        db.ChangeTracker.Clear();
+        var saved = await CopilotHistory.SaveAsync(org, flow.Id, new("Explain this workflow", "Finance reviews above the threshold."), owner, db, config, token);
+        Assert.Equal(204, Assert.IsAssignableFrom<IStatusCodeHttpResult>(saved).StatusCode);
+        Assert.Equal(20, await db.CopilotQuestions.CountAsync(token));
+        Assert.Equal("Finance reviews above the threshold.", await db.CopilotQuestions.Where(row =>
+            row.Text == "Explain this workflow").Select(row => row.Answer).SingleAsync(token));
+        var other = await CopilotHistory.ListAsync(org, flow.Id, admin, db, config, token);
+        var value = Assert.IsAssignableFrom<IValueHttpResult>(other).Value;
+        Assert.Empty(Assert.IsAssignableFrom<System.Collections.IEnumerable>(value!.GetType().GetProperty("Items")!.GetValue(value)));
+        var crossTenant = await CopilotHistory.ListAsync(Guid.NewGuid(), flow.Id, owner, db, config, token);
+        Assert.Equal(404, Assert.IsAssignableFrom<IStatusCodeHttpResult>(crossTenant).StatusCode);
+        await CopilotHistory.ClearAsync(org, flow.Id, admin, db, token);
+        Assert.Equal(20, await db.CopilotQuestions.CountAsync(token));
+        await CopilotHistory.ClearAsync(org, flow.Id, owner, db, token);
+        Assert.Empty(await db.CopilotQuestions.ToListAsync(token));
+    }
+
+    [Fact]
+    public async Task CopilotEnforcesTenantAndQuotaBeforeCallingProvider()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var org = Guid.NewGuid();
+        await using var db = OpenDatabase();
+        db.Organizations.Add(new() { Id = org, Name = "Copilot", Slug = "copilot" });
+        db.Memberships.Add(new() { OrganizationId = org, Subject = "owner", Role = "OrganizationOwner" });
+        await db.SaveChangesAsync(token);
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Copilot:Enabled"] = "true", ["Copilot:ApiKey"] = "unit-test-provider",
+            ["Copilot:Model"] = "test-model", ["Copilot:MonthlyRequests"] = "1",
+        }).Build();
+        var user = new ClaimsPrincipal(new ClaimsIdentity([new Claim("sub", "owner")], "test"));
+        var provider = new TestCopilotProvider();
+        var prompt = new CopilotEndpoints.CopilotInput("Include finance above 5000");
+        async Task<int?> Generate(Guid tenant, IConfiguration settings) =>
+            Assert.IsAssignableFrom<IStatusCodeHttpResult>(
+                await CopilotEndpoints.GenerateAsync(tenant, prompt, user, db, settings, provider, token)).StatusCode;
+
+        Assert.Equal(404, await Generate(Guid.NewGuid(), config));
+        Assert.Equal(503, await Generate(org, new ConfigurationBuilder().Build()));
+        var analytics = await CopilotTools.AnalyticsAsync(org, new("Show average approval timing", 30),
+            user, db, new ConfigurationBuilder().Build(), provider, token);
+        Assert.Equal(503, Assert.IsAssignableFrom<IStatusCodeHttpResult>(analytics).StatusCode);
+        Assert.Equal(0, provider.Calls);
+        Assert.Equal(200, await Generate(org, config));
+        Assert.Equal(429, await Generate(org, config));
+        Assert.Equal(1, provider.Calls);
+        var record = await db.CopilotUsages.SingleAsync(token);
+        Assert.Equal("completed", record.Status);
+        Assert.Equal(50, record.InputTokens);
+        Assert.Null(record.EstimatedCostUsd);
+        Assert.Empty(await db.PurchaseWorkflows.ToListAsync(token));
+    }
+
+    private sealed class TestCopilotProvider : ICopilotProvider
+    {
+        public int Calls { get; private set; }
+        public Task<CopilotResult> GenerateAsync(string prompt, CancellationToken token, CopilotContract? contract = null)
+        {
+            Calls++;
+            return Task.FromResult(new CopilotResult("""
+                {"name":"Purchase review","route":"managerFinance","financeThreshold":5000,"limitations":[]}
+                """, 50, 30, "completed"));
+        }
+    }
+
     private readonly PostgreSqlContainer postgres = new PostgreSqlBuilder("postgres:16.14-alpine").Build();
 
     public async ValueTask InitializeAsync()
